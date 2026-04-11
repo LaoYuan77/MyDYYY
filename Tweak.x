@@ -1,5 +1,13 @@
 #import <UIKit/UIKit.h>
 
+// ========== 身份声明 ==========
+@interface AWEFeedTabJumpGuideView : UIView
+@end
+
+@interface AWEFeedMultiTabSelectedContainerView : UIView
+@end
+// ==============================
+
 // ==========================================
 // 功能 1：隐藏双列箭头（已成功）
 // ==========================================
@@ -50,7 +58,9 @@
 // ==========================================
 %hook AWENormalModeTabBarGeneralButton
 - (BOOL)enableRefresh {
-    if ([self.accessibilityLabel isEqualToString:@"首页"]) {
+    // 强制转换为 UIButton 获取文本标签，避免编译器报错
+    UIButton *btn = (UIButton *)self;
+    if ([btn.accessibilityLabel isEqualToString:@"首页"]) {
         return NO; // 只要是首页按钮，强制返回 NO，禁止刷新
     }
     return %orig;
@@ -58,9 +68,7 @@
 %end
 
 // ==========================================
-// 功能 5：禁用下拉刷新视频（借鉴你的思路：魔法打败魔法）
-// 原理：不再死磕“拉不动”，而是直接把控制器的“允许刷新”属性给干掉。
-// 让你拉，但是拉了不触发刷新数据！
+// 功能 5：禁用下拉刷新视频（逻辑阉割法）
 // ==========================================
 %hook AWEFeedTableViewController
 // 强行把可刷新的属性返回 NO
