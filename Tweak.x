@@ -1,14 +1,8 @@
 #import <UIKit/UIKit.h>
 
-// ========== 身份声明 ==========
-@interface AWEFeedTabJumpGuideView : UIView
-@end
-
-@interface AWEFeedMultiTabSelectedContainerView : UIView
-@end
-// ==============================
-
+// ==========================================
 // 功能 1：隐藏双列箭头（已成功）
+// ==========================================
 %hook AWEFeedTabJumpGuideView
 - (void)layoutSubviews {
     %orig;
@@ -20,7 +14,9 @@
 - (void)setAlpha:(CGFloat)alpha { %orig(0.0); }
 %end
 
+// ==========================================
 // 功能 2：隐藏顶栏横线（已成功）
+// ==========================================
 %hook AWEFeedMultiTabSelectedContainerView
 - (void)layoutSubviews {
     %orig;
@@ -32,30 +28,53 @@
 %end
 
 // ==========================================
-// 功能 3：究极防下拉刷新 4.0 - 祖宗类物理锁死
-// 原理：直接在所有滚动视图的“老祖宗” UIScrollView 里下毒。
-// 只要你叫“推荐流”，你的 Y 坐标就绝对不可能变成负数！
+// 功能 3：禁用直播 PCDN（纯净提取自 DYYY 源码）
 // ==========================================
-
-%hook UIScrollView
-- (void)setContentOffset:(CGPoint)offset {
-    // 探测当前滑动列表的代理，如果是抖音的视频流，直接拦截
-    id delegate = self.delegate;
-    if (delegate) {
-        NSString *delegateName = NSStringFromClass([delegate class]);
-        // 覆盖老版Feed、新版AwemeDetail、以及底层ListKit
-        if ([delegateName containsString:@"Feed"] || 
-            [delegateName containsString:@"AwemeDetail"] || 
-            [delegateName containsString:@"ListKit"]) {
-            
-            // 只要试图向下拉（Y变负数），立刻强制按死在0
-            if (offset.y < 0) {
-                offset.y = 0; 
-                self.bounces = NO; // 顺手关掉边缘回弹
-                self.alwaysBounceVertical = NO;
-            }
-        }
-    }
-    %orig(offset);
+%hook HTSLiveStreamPcdnManager
++ (void)start {
+    // 掏空内部，什么都不做，直接拦截
 }
++ (void)configAndStartLiveIO {
+    // 掏空内部，什么都不做，直接拦截
+}
+%end
+
+%hook IESLiveLaunchTaskPcdn
+- (void)excute {
+    // 掏空内部，什么都不做，直接拦截
+}
+%end
+
+// ==========================================
+// 功能 4：禁用点击首页刷新（纯净提取自 DYYY 源码）
+// ==========================================
+%hook AWENormalModeTabBarGeneralButton
+- (BOOL)enableRefresh {
+    if ([self.accessibilityLabel isEqualToString:@"首页"]) {
+        return NO; // 只要是首页按钮，强制返回 NO，禁止刷新
+    }
+    return %orig;
+}
+%end
+
+// ==========================================
+// 功能 5：禁用下拉刷新视频（借鉴你的思路：魔法打败魔法）
+// 原理：不再死磕“拉不动”，而是直接把控制器的“允许刷新”属性给干掉。
+// 让你拉，但是拉了不触发刷新数据！
+// ==========================================
+%hook AWEFeedTableViewController
+// 强行把可刷新的属性返回 NO
+- (BOOL)canRefresh { return NO; }
+- (void)setCanRefresh:(BOOL)arg { %orig(NO); }
+
+// 拦截已知的抖音刷新动作函数，让它变空壳
+- (void)refreshData {}
+- (void)handlePullToRefresh {}
+- (void)pulldownToRefresh {}
+%end
+
+%hook AWEFeedContainerViewController
+// 双重保险，把外部容器的刷新权限也干掉
+- (BOOL)canRefresh { return NO; }
+- (void)setCanRefresh:(BOOL)arg { %orig(NO); }
 %end
