@@ -9,9 +9,12 @@
 
 @interface AWEFeedTableView : UIScrollView
 @end
+
+@interface AWEListKitMagicCollectionView : UIScrollView
+@end
 // ==============================
 
-// 功能 1：隐藏双列箭头（暴力拔除 + 透明度双保险）
+// 功能 1：隐藏双列箭头（保持成功逻辑）
 %hook AWEFeedTabJumpGuideView
 - (void)layoutSubviews {
     %orig;
@@ -19,36 +22,58 @@
     self.hidden = YES;
     [self removeFromSuperview];
 }
-// 拦截任何试图让它显示的操作
-- (void)setHidden:(BOOL)hidden {
-    %orig(YES);
-}
-- (void)setAlpha:(CGFloat)alpha {
-    %orig(0.0);
-}
+- (void)setHidden:(BOOL)hidden { %orig(YES); }
+- (void)setAlpha:(CGFloat)alpha { %orig(0.0); }
 %end
 
-// 功能 2：隐藏顶栏横线（强制透明 + 隐藏）
+// 功能 2：隐藏顶栏横线（保持成功逻辑）
 %hook AWEFeedMultiTabSelectedContainerView
 - (void)layoutSubviews {
     %orig;
     self.alpha = 0.0;
     self.hidden = YES;
 }
-- (void)setHidden:(BOOL)hidden {
-    %orig(YES);
-}
-- (void)setAlpha:(CGFloat)alpha {
-    %orig(0.0);
-}
+- (void)setHidden:(BOOL)hidden { %orig(YES); }
+- (void)setAlpha:(CGFloat)alpha { %orig(0.0); }
 %end
 
-// 功能 3：禁用顶部下拉刷新视频（直接关闭边缘回弹，干脆利落）
+// ==========================================
+// 功能 3：终极防御 - 彻底禁用顶部下拉刷新
+// 原理：拦截底层的 bounds 和 offset 变化，彻底封死向下拉动的物理空间。
+// 同时覆盖 TableView 和新版抖音特有的 MagicCollectionView。
+// ==========================================
+
 %hook AWEFeedTableView
-- (BOOL)bounces {
-    return NO;
+- (void)setBounds:(CGRect)bounds {
+    // 禁止 bounds.origin.y 小于 0（即禁止画面被向下拉出边界）
+    if (bounds.origin.y < 0) {
+        bounds.origin.y = 0;
+    }
+    %orig(bounds);
 }
-- (void)setBounces:(BOOL)bounces {
-    %orig(NO); // 强制拒绝任何开启回弹的请求
+- (void)setContentOffset:(CGPoint)offset {
+    if (offset.y < 0) {
+        offset.y = 0;
+    }
+    %orig(offset);
 }
+- (BOOL)bounces { return NO; }
+- (void)setBounces:(BOOL)bounces { %orig(NO); }
+%end
+
+%hook AWEListKitMagicCollectionView
+- (void)setBounds:(CGRect)bounds {
+    if (bounds.origin.y < 0) {
+        bounds.origin.y = 0;
+    }
+    %orig(bounds);
+}
+- (void)setContentOffset:(CGPoint)offset {
+    if (offset.y < 0) {
+        offset.y = 0;
+    }
+    %orig(offset);
+}
+- (BOOL)bounces { return NO; }
+- (void)setBounces:(BOOL)bounces { %orig(NO); }
 %end
