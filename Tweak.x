@@ -5,14 +5,15 @@
 @end
 @interface AWEFeedMultiTabSelectedContainerView : UIView
 @end
+@interface AWENormalModeTabBarTextView : UIView
+@end
 @interface AWENormalModeTabBarGeneralButton : UIButton
 @property (nonatomic, assign) NSInteger status;
-- (void)swallowedTap_dyyy:(UITapGestureRecognizer *)gesture; // 声明我们的护盾手势
 @end
 // ============================================
 
 // ==========================================
-// 功能 1：隐藏双列箭头（✅ 已成功）
+// 功能 1：隐藏双列箭头（✅）
 // ==========================================
 %hook AWEFeedTabJumpGuideView
 - (void)layoutSubviews {
@@ -26,7 +27,7 @@
 %end
 
 // ==========================================
-// 功能 2：隐藏顶栏横线（✅ 已成功）
+// 功能 2：隐藏顶栏横线（✅）
 // ==========================================
 %hook AWEFeedMultiTabSelectedContainerView
 - (void)layoutSubviews {
@@ -39,7 +40,7 @@
 %end
 
 // ==========================================
-// 功能 3：禁用下拉刷新视频（✅ 已成功）
+// 功能 3：禁用下拉刷新视频（✅）
 // ==========================================
 %hook AWEFeedTableViewController
 - (BOOL)canRefresh { return NO; }
@@ -55,7 +56,7 @@
 %end
 
 // ==========================================
-// 功能 4：禁用直播 PCDN（✅ 后台静默生效）
+// 功能 4：禁用直播 PCDN（✅）
 // ==========================================
 %hook HTSLiveStreamPcdnManager
 + (void)start {}
@@ -67,63 +68,57 @@
 %end
 
 // ==========================================
-// 功能 5：禁用点击首页刷新（🔥 物理防爆盾战术，无视一切插件冲突）
+// 功能 5：将底栏“首页”文字修改为“𝑳𝒐𝒗𝒆”（🔥 新增）
 // ==========================================
-%hook AWENormalModeTabBarGeneralButton
-
+%hook AWENormalModeTabBarTextView
 - (void)layoutSubviews {
     %orig;
     @try {
-        // 使用 containsString 防止新版抖音名称微调（如"首页，按钮"）
-        NSString *label = [self performSelector:@selector(accessibilityLabel)];
-        if ([label containsString:@"首页"]) {
-            
-            NSNumber *statusObj = [self valueForKey:@"status"];
-            UIView *shield = [self viewWithTag:88888]; // 寻找我们的护盾
-            
-            if (statusObj && [statusObj integerValue] == 2) {
-                // 当前在首页：升起护盾！
-                if (!shield) {
-                    // 凭空制造一块透明玻璃，大小和按钮一模一样
-                    shield = [[UIView alloc] initWithFrame:self.bounds];
-                    shield.tag = 88888;
-                    shield.backgroundColor = [UIColor clearColor]; // 必须透明
-                    shield.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-                    
-                    // 给玻璃绑上化解手势
-                    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(swallowedTap_dyyy:)];
-                    [shield addGestureRecognizer:tap];
-                    
-                    [self addSubview:shield];
-                }
-                shield.hidden = NO;
-                [self bringSubviewToFront:shield]; // 确保玻璃永远在最上层！无视其他插件！
-                
-            } else {
-                // 不在首页：撤下护盾，允许你点击切回首页
-                if (shield) {
-                    shield.hidden = YES;
+        for (UIView *subview in self.subviews) {
+            // 找到底栏的文字标签
+            if ([subview isKindOfClass:[UILabel class]]) {
+                UILabel *label = (UILabel *)subview;
+                if ([label.text isEqualToString:@"首页"]) {
+                    // 强行改名！
+                    label.text = @"𝑳𝒐𝒗𝒆";
                 }
             }
         }
-    } @catch (NSException *e) {}
+    } @catch(NSException *e) {}
+}
+%end
+
+// ==========================================
+// 功能 6：禁用点击首页刷新（🔥 实时物理拦截，修复卡死 Bug）
+// ==========================================
+%hook AWENormalModeTabBarGeneralButton
+
+// 在手指碰到屏幕的瞬间进行实时判断，不依赖页面布局
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    @try {
+        NSString *label = [self performSelector:@selector(accessibilityLabel)];
+        // 兼容原名“首页”和我们改的新名字“𝑳𝒐𝒗𝒆”
+        if ([label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"]) {
+            NSNumber *statusObj = [self valueForKey:@"status"];
+            if (statusObj && [statusObj integerValue] == 2) {
+                // 如果当前已经在 𝑳𝒐𝒗𝒆 页，直接拒绝触摸，点不动！
+                return NO;
+            }
+        }
+    } @catch(NSException *e) {}
+    
+    // 如果在消息页等其他页面，正常放行触摸，允许切回 𝑳𝒐𝒗𝒆 页
+    return %orig(point, event);
 }
 
-// 吸收触摸事件的黑洞函数
-%new
-- (void)swallowedTap_dyyy:(UITapGestureRecognizer *)gesture {
-    // 触摸被护盾吸收，不执行任何代码，直接化解点击！
-}
-
-// 原汁原味的底层许可拦截（兜底保平安）
+// 附赠双重保险
 - (BOOL)enableRefresh {
     @try {
         NSString *label = [self performSelector:@selector(accessibilityLabel)];
-        if ([label containsString:@"首页"]) {
+        if ([label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"]) {
             return NO;
         }
-    } @catch (NSException *e) {}
+    } @catch(NSException *e) {}
     return %orig;
 }
-
 %end
