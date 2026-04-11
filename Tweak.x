@@ -3,16 +3,13 @@
 // ========== 身份声明（防止编译报错） ==========
 @interface AWEFeedTabJumpGuideView : UIView
 @end
-
 @interface AWEFeedMultiTabSelectedContainerView : UIView
 @end
-
-// 声明底部按钮，告诉编译器它有个叫 status 的属性
 @interface AWENormalModeTabBarGeneralButton : UIButton
 @property (nonatomic, assign) NSInteger status;
+- (void)swallowedTap_dyyy:(UITapGestureRecognizer *)gesture; // 声明我们的护盾手势
 @end
 // ============================================
-
 
 // ==========================================
 // 功能 1：隐藏双列箭头（✅ 已成功）
@@ -70,41 +67,63 @@
 %end
 
 // ==========================================
-// 功能 5：禁用点击首页刷新（🔥 终极物理触控盲区法）
-// 原理：在 iOS 系统判断手指触摸归属时，直接拒绝认领该触摸事件！
-// 连触摸信号都不产生，彻底无视一切手势和其他插件的冲突。
+// 功能 5：禁用点击首页刷新（🔥 物理防爆盾战术，无视一切插件冲突）
 // ==========================================
 %hook AWENormalModeTabBarGeneralButton
 
-// 拦截系统触控判定
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+- (void)layoutSubviews {
+    %orig;
     @try {
+        // 使用 containsString 防止新版抖音名称微调（如"首页，按钮"）
         NSString *label = [self performSelector:@selector(accessibilityLabel)];
-        if ([label isEqualToString:@"首页"]) {
-            // 获取按钮当前状态，2 代表正处于选中（当前在首页）
+        if ([label containsString:@"首页"]) {
+            
             NSNumber *statusObj = [self valueForKey:@"status"];
+            UIView *shield = [self viewWithTag:88888]; // 寻找我们的护盾
+            
             if (statusObj && [statusObj integerValue] == 2) {
-                // 🔥 核心杀招：直接返回 NO！
-                // 告诉 iOS 系统：我这里是空气，别把点击事件发给我！
-                return NO;
+                // 当前在首页：升起护盾！
+                if (!shield) {
+                    // 凭空制造一块透明玻璃，大小和按钮一模一样
+                    shield = [[UIView alloc] initWithFrame:self.bounds];
+                    shield.tag = 88888;
+                    shield.backgroundColor = [UIColor clearColor]; // 必须透明
+                    shield.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                    
+                    // 给玻璃绑上化解手势
+                    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(swallowedTap_dyyy:)];
+                    [shield addGestureRecognizer:tap];
+                    
+                    [self addSubview:shield];
+                }
+                shield.hidden = NO;
+                [self bringSubviewToFront:shield]; // 确保玻璃永远在最上层！无视其他插件！
+                
+            } else {
+                // 不在首页：撤下护盾，允许你点击切回首页
+                if (shield) {
+                    shield.hidden = YES;
+                }
             }
         }
-    } @catch (NSException *e) {
-        // 防止意外报错
-    }
-    
-    // 如果不是首页按钮，或者当前没在首页，正常放行触摸
-    return %orig(point, event);
+    } @catch (NSException *e) {}
 }
 
-// 附赠 DYYY 原汁原味的属性拦截（双重保险）
+// 吸收触摸事件的黑洞函数
+%new
+- (void)swallowedTap_dyyy:(UITapGestureRecognizer *)gesture {
+    // 触摸被护盾吸收，不执行任何代码，直接化解点击！
+}
+
+// 原汁原味的底层许可拦截（兜底保平安）
 - (BOOL)enableRefresh {
     @try {
         NSString *label = [self performSelector:@selector(accessibilityLabel)];
-        if ([label isEqualToString:@"首页"]) {
+        if ([label containsString:@"首页"]) {
             return NO;
         }
     } @catch (NSException *e) {}
     return %orig;
 }
+
 %end
