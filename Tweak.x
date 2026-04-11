@@ -11,9 +11,6 @@
 @interface AWENormalModeTabBarGeneralButton : UIButton
 @property (nonatomic, assign) NSInteger status;
 @end
-
-@interface AWENormalModeTabBar : UIView
-@end
 // ============================================
 
 
@@ -61,7 +58,7 @@
 %end
 
 // ==========================================
-// 功能 4：禁用直播 PCDN（后台静默生效）
+// 功能 4：禁用直播 PCDN（✅ 后台静默生效）
 // ==========================================
 %hook HTSLiveStreamPcdnManager
 + (void)start {}
@@ -73,32 +70,34 @@
 %end
 
 // ==========================================
-// 功能 5：禁用点击首页刷新（🔥 终极底层触摸拦截，无视其他插件冲突）
+// 功能 5：禁用点击首页刷新（🔥 终极物理触控盲区法）
+// 原理：在 iOS 系统判断手指触摸归属时，直接拒绝认领该触摸事件！
+// 连触摸信号都不产生，彻底无视一切手势和其他插件的冲突。
 // ==========================================
 %hook AWENormalModeTabBarGeneralButton
 
-// 拦截 iOS 最底层的按钮点击事件分发
-- (void)sendAction:(SEL)action to:(id)target forEvent:(UIEvent *)event {
+// 拦截系统触控判定
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     @try {
         NSString *label = [self performSelector:@selector(accessibilityLabel)];
         if ([label isEqualToString:@"首页"]) {
             // 获取按钮当前状态，2 代表正处于选中（当前在首页）
             NSNumber *statusObj = [self valueForKey:@"status"];
             if (statusObj && [statusObj integerValue] == 2) {
-                // 🔥 核心杀招：直接 return，把点击事件生吞了！
-                // 不调用 %orig，其他任何代码、任何插件都收不到这个点击信号！
-                return; 
+                // 🔥 核心杀招：直接返回 NO！
+                // 告诉 iOS 系统：我这里是空气，别把点击事件发给我！
+                return NO;
             }
         }
     } @catch (NSException *e) {
-        // 防止意外闪退
+        // 防止意外报错
     }
     
-    // 如果不是首页，或者不在选中状态，正常放行
-    %orig(action, target, event);
+    // 如果不是首页按钮，或者当前没在首页，正常放行触摸
+    return %orig(point, event);
 }
 
-// 附赠双重保险
+// 附赠 DYYY 原汁原味的属性拦截（双重保险）
 - (BOOL)enableRefresh {
     @try {
         NSString *label = [self performSelector:@selector(accessibilityLabel)];
