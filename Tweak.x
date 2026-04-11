@@ -6,9 +6,13 @@
 
 @interface AWEFeedMultiTabSelectedContainerView : UIView
 @end
+
+@interface AWEFeedTableViewController : UIViewController
+- (void)disableBouncesForView:(UIView *)view;
+@end
 // ==============================
 
-// 功能 1：隐藏双列箭头（已成功，保持原样）
+// 功能 1：隐藏双列箭头（保持成功逻辑）
 %hook AWEFeedTabJumpGuideView
 - (void)layoutSubviews {
     %orig;
@@ -20,7 +24,7 @@
 - (void)setAlpha:(CGFloat)alpha { %orig(0.0); }
 %end
 
-// 功能 2：隐藏顶栏横线（已成功，保持原样）
+// 功能 2：隐藏顶栏横线（保持成功逻辑）
 %hook AWEFeedMultiTabSelectedContainerView
 - (void)layoutSubviews {
     %orig;
@@ -32,65 +36,36 @@
 %end
 
 // ==========================================
-// 功能 3：终极杀手锏 - 降维打击禁用下拉刷新
-// 原理：直接拦截 iOS 系统底层的 UITableView 和 UICollectionView。
-// 只要发现是“视频流（Feed）”在试图向下拉（y < 0），直接按死归零并强行关闭回弹！
+// 功能 3：终极杀手锏 3.0 - 控制器级暴力封杀
 // ==========================================
 
-%hook UITableView
-- (void)setContentOffset:(CGPoint)offset {
-    if (offset.y < 0) {
-        id delegate = self.delegate;
-        if (delegate) {
-            NSString *className = NSStringFromClass([delegate class]);
-            if ([className containsString:@"Feed"] && [className containsString:@"Controller"]) {
-                offset.y = 0;
-                self.bounces = NO; // 彻底关闭回弹
-            }
-        }
-    }
-    %orig(offset);
+%hook AWEFeedTableViewController
+
+// 每次页面显示，查水表关闭所有滚动视图的弹性
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    [self disableBouncesForView:self.view];
 }
 
-- (void)setBounds:(CGRect)bounds {
-    if (bounds.origin.y < 0) {
-        id delegate = self.delegate;
-        if (delegate) {
-            NSString *className = NSStringFromClass([delegate class]);
-            if ([className containsString:@"Feed"] && [className containsString:@"Controller"]) {
-                bounds.origin.y = 0;
-            }
-        }
+// 递归遍历所有子视图，宁可错杀一千不放过一个
+%new
+- (void)disableBouncesForView:(UIView *)view {
+    if ([view isKindOfClass:[UIScrollView class]]) {
+        UIScrollView *scrollView = (UIScrollView *)view;
+        scrollView.bounces = NO;
+        scrollView.alwaysBounceVertical = NO;
     }
-    %orig(bounds);
-}
-%end
-
-%hook UICollectionView
-- (void)setContentOffset:(CGPoint)offset {
-    if (offset.y < 0) {
-        id delegate = self.delegate;
-        if (delegate) {
-            NSString *className = NSStringFromClass([delegate class]);
-            if ([className containsString:@"Feed"] && [className containsString:@"Controller"]) {
-                offset.y = 0;
-                self.bounces = NO; // 彻底关闭回弹
-            }
-        }
+    // 遍历下层视图
+    for (UIView *subview in view.subviews) {
+        [self disableBouncesForView:subview];
     }
-    %orig(offset);
 }
 
-- (void)setBounds:(CGRect)bounds {
-    if (bounds.origin.y < 0) {
-        id delegate = self.delegate;
-        if (delegate) {
-            NSString *className = NSStringFromClass([delegate class]);
-            if ([className containsString:@"Feed"] && [className containsString:@"Controller"]) {
-                bounds.origin.y = 0;
-            }
-        }
-    }
-    %orig(bounds);
-}
+// 拦截各种已知的抖音刷新动作，直接没收执行权限（让刷新函数变成空壳）
+- (void)_refreshData {}
+- (void)refreshData {}
+- (void)headerRefreshing {}
+- (void)pulldownToRefresh {}
+- (void)handlePullDownToRefresh {}
+
 %end
