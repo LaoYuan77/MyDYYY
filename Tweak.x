@@ -73,31 +73,39 @@
 %end
 
 // ==========================================
-// 功能 5：禁用点击首页刷新（1:1 原汁原味复刻 DYYY）
+// 功能 5：禁用点击首页刷新（🔥 终极底层触摸拦截，无视其他插件冲突）
 // ==========================================
-%hook AWENormalModeTabBar
-- (void)layoutSubviews {
-    %orig;
-    // 遍历底部的所有按钮
-    Class generalButtonClass = NSClassFromString(@"AWENormalModeTabBarGeneralButton");
-    for (UIView *subview in self.subviews) {
-        if ([subview isKindOfClass:generalButtonClass]) {
-            AWENormalModeTabBarGeneralButton *button = (AWENormalModeTabBarGeneralButton *)subview;
-            if ([button.accessibilityLabel isEqualToString:@"首页"]) {
-                // 原版精髓：如果 status == 2（代表正处于首页），直接冻结交互！
-                button.userInteractionEnabled = (button.status != 2);
+%hook AWENormalModeTabBarGeneralButton
+
+// 拦截 iOS 最底层的按钮点击事件分发
+- (void)sendAction:(SEL)action to:(id)target forEvent:(UIEvent *)event {
+    @try {
+        NSString *label = [self performSelector:@selector(accessibilityLabel)];
+        if ([label isEqualToString:@"首页"]) {
+            // 获取按钮当前状态，2 代表正处于选中（当前在首页）
+            NSNumber *statusObj = [self valueForKey:@"status"];
+            if (statusObj && [statusObj integerValue] == 2) {
+                // 🔥 核心杀招：直接 return，把点击事件生吞了！
+                // 不调用 %orig，其他任何代码、任何插件都收不到这个点击信号！
+                return; 
             }
         }
+    } @catch (NSException *e) {
+        // 防止意外闪退
     }
+    
+    // 如果不是首页，或者不在选中状态，正常放行
+    %orig(action, target, event);
 }
-%end
 
-// 双重保险：拦截刷新许可
-%hook AWENormalModeTabBarGeneralButton
+// 附赠双重保险
 - (BOOL)enableRefresh {
-    if ([self.accessibilityLabel isEqualToString:@"首页"]) {
-        return NO;
-    }
+    @try {
+        NSString *label = [self performSelector:@selector(accessibilityLabel)];
+        if ([label isEqualToString:@"首页"]) {
+            return NO;
+        }
+    } @catch (NSException *e) {}
     return %orig;
 }
 %end
