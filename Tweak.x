@@ -21,11 +21,11 @@ static inline BOOL DYYYGetBool(NSString *key) {
 @interface AWERelatedMusicAnchorModel : NSObject @end
 @interface AWEMusicExtraModel : NSObject @end
 @interface AWEIMMessageTabOptPushBannerView : UIView @end
-@interface AWEIMChatListViewController : UIViewController @end
+@interface AWEIMMessagePushHeaderView : UIView @end // 增加备用横幅类
 // ============================================
 
 // ==========================================
-// 功能 1：隐藏双列箭头（✅）
+// 功能 1：隐藏双列箭头
 // ==========================================
 %hook AWEFeedTabJumpGuideView
 - (void)layoutSubviews {
@@ -39,7 +39,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 2：隐藏顶栏横线（✅）
+// 功能 2：隐藏顶栏横线
 // ==========================================
 %hook AWEFeedMultiTabSelectedContainerView
 - (void)layoutSubviews {
@@ -52,7 +52,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 3：禁用下拉刷新视频（✅）
+// 功能 3：禁用下拉刷新视频
 // ==========================================
 %hook AWEFeedTableViewController
 - (BOOL)canRefresh { return NO; }
@@ -68,7 +68,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 4：禁用直播 PCDN（✅）
+// 功能 4：禁用直播 PCDN
 // ==========================================
 %hook HTSLiveStreamPcdnManager
 + (void)start {}
@@ -80,7 +80,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 5：将底栏“首页”文字修改为“𝑳𝒐𝒗𝒆”（🔥 新增）
+// 功能 5：将底栏“首页”文字修改为“𝑳𝒐𝒗𝒆”
 // ==========================================
 %hook AWENormalModeTabBarTextView
 - (void)layoutSubviews {
@@ -99,7 +99,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 6：禁用点击首页刷新（🔥 实时物理拦截，修复卡死 Bug）
+// 功能 6：禁用点击首页刷新（实时物理拦截）
 // ==========================================
 %hook AWENormalModeTabBarGeneralButton
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
@@ -237,44 +237,65 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 11：隐藏消息页打开提醒的横幅 (控制器欺骗版，彻底消除留白)
+// 功能 11：隐藏消息页打开提醒的横幅 (高度欺骗终极版)
 // ==========================================
-// 1. 拦截横幅本身的渲染
+
+// 拦截横幅 1：AWEIMMessageTabOptPushBannerView
 %hook AWEIMMessageTabOptPushBannerView
 - (void)layoutSubviews {
     %orig;
     if (DYYYGetBool(@"DYYYHidePushBanner")) {
         self.hidden = YES;
         self.alpha = 0.0;
-        self.frame = CGRectZero;
+        [self removeFromSuperview];
+    }
+}
+// 强制告诉父容器，我的高度是 0！
+- (CGSize)intrinsicContentSize {
+    if (DYYYGetBool(@"DYYYHidePushBanner")) return CGSizeZero;
+    return %orig;
+}
+- (CGSize)sizeThatFits:(CGSize)size {
+    if (DYYYGetBool(@"DYYYHidePushBanner")) return CGSizeZero;
+    return %orig;
+}
+- (void)setFrame:(CGRect)frame {
+    if (DYYYGetBool(@"DYYYHidePushBanner")) {
+        %orig(CGRectZero);
+    } else {
+        %orig(frame);
+    }
+}
+// 拦截所有可能的高度获取方法
++ (CGFloat)bannerHeight { return DYYYGetBool(@"DYYYHidePushBanner") ? 0.0 : %orig; }
+- (CGFloat)bannerHeight { return DYYYGetBool(@"DYYYHidePushBanner") ? 0.0 : %orig; }
++ (CGFloat)defaultHeight { return DYYYGetBool(@"DYYYHidePushBanner") ? 0.0 : %orig; }
+- (CGFloat)defaultHeight { return DYYYGetBool(@"DYYYHidePushBanner") ? 0.0 : %orig; }
+%end
+
+// 拦截横幅 2（备用）：AWEIMMessagePushHeaderView (你也搜过这个，顺手一起干掉)
+%hook AWEIMMessagePushHeaderView
+- (void)layoutSubviews {
+    %orig;
+    if (DYYYGetBool(@"DYYYHidePushBanner")) {
+        self.hidden = YES;
+        self.alpha = 0.0;
+        [self removeFromSuperview];
     }
 }
 - (CGSize)intrinsicContentSize {
     if (DYYYGetBool(@"DYYYHidePushBanner")) return CGSizeZero;
     return %orig;
 }
-%end
-
-// 2. 欺骗控制器：拦截所有询问“横幅是否显示”的方法，返回 NO 或 0
-%hook AWEIMChatListViewController
-- (BOOL)shouldShowPushBanner {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) return NO;
+- (CGSize)sizeThatFits:(CGSize)size {
+    if (DYYYGetBool(@"DYYYHidePushBanner")) return CGSizeZero;
     return %orig;
 }
-- (BOOL)isPushBannerShowing {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) return NO;
-    return %orig;
-}
-- (BOOL)pushBannerIsShowing {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) return NO;
-    return %orig;
-}
-- (id)pushBannerView {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) return nil;
-    return %orig;
-}
-- (double)pushBannerHeight {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) return 0.0;
-    return %orig;
+- (void)setFrame:(CGRect)frame {
+    if (DYYYGetBool(@"DYYYHidePushBanner")) {
+        %orig(CGRectZero);
+    } else {
+        %orig(frame);
+    }
 }
 %end
