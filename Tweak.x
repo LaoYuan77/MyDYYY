@@ -264,30 +264,44 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 11：隐藏消息页打开提醒的横幅 (强化版)
+// 功能 11：隐藏消息页打开提醒的横幅 (核弹强化版)
 // ==========================================
 %hook AWEIMMessageTabOptPushBannerView
-- (void)layoutSubviews {
+
+// 1. 只要被加到屏幕上，立刻自我销毁
+- (void)didMoveToSuperview {
     %orig;
     if (DYYYGetBool(@"DYYYHidePushBanner")) {
-        // 彻底隐藏
         self.hidden = YES;
-        self.alpha = 0.0;
-        
-        // 防止父容器留下空白，将其高度压扁
-        CGRect frame = self.frame;
-        if (frame.size.height > 0) {
-            frame.size.height = 0;
-            self.frame = frame;
-        }
+        [self removeFromSuperview];
     }
 }
 
-// 保留原有的初始化压扁逻辑，双管齐下
-- (instancetype)initWithFrame:(CGRect)frame {
+// 2. 如果父视图强行排版，再次销毁并透明化
+- (void)layoutSubviews {
+    %orig;
     if (DYYYGetBool(@"DYYYHidePushBanner")) {
-        return %orig(CGRectMake(frame.origin.x, frame.origin.y, 0, 0));
+        self.hidden = YES;
+        self.alpha = 0.0;
+        [self removeFromSuperview];
+    }
+}
+
+// 3. 告诉自动布局（AutoLayout）：我的尺寸是 0x0
+- (CGSize)intrinsicContentSize {
+    if (DYYYGetBool(@"DYYYHidePushBanner")) {
+        return CGSizeZero;
     }
     return %orig;
 }
+
+// 4. 拦截所有的 Frame 赋值，强行锁死为 0
+- (void)setFrame:(CGRect)frame {
+    if (DYYYGetBool(@"DYYYHidePushBanner")) {
+        %orig(CGRectZero);
+    } else {
+        %orig(frame);
+    }
+}
+
 %end
