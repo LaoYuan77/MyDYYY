@@ -1,25 +1,26 @@
 #import <UIKit/UIKit.h>
 
+// ========== 工具函数：替代缺失的 DYYYGetBool ==========
+static inline BOOL DYYYGetBool(NSString *key) {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:key];
+}
+
 // ========== 身份声明（防止编译报错） ==========
-@interface AWEFeedTabJumpGuideView : UIView
-@end
-@interface AWEFeedMultiTabSelectedContainerView : UIView
-@end
-@interface AWENormalModeTabBarTextView : UIView
-@end
+@interface AWEFeedTabJumpGuideView : UIView @end
+@interface AWEFeedMultiTabSelectedContainerView : UIView @end
+@interface AWENormalModeTabBarTextView : UIView @end
 @interface AWENormalModeTabBarGeneralButton : UIButton
 @property (nonatomic, assign) NSInteger status;
 @end
-
-// ========== 工具内联函数（去冗余优化） ==========
-// 辅助判定底栏“首页”按钮，防止在多个方法中重复写判定逻辑
-static inline BOOL isHomeButton(id btn) {
-    @try {
-        NSString *label = [btn performSelector:@selector(accessibilityLabel)];
-        return [label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"];
-    } @catch(NSException *e) {}
-    return NO;
-}
+@interface AWESearchAnchorListModel : NSObject @end
+@interface AWEPlayInteractionSearchAnchorView : UIView @end
+@interface AWEHotSearchInnerBottomView : UIView @end
+@interface AWEHotSpotListModel : NSObject @end
+@interface AWEIMMessageTabSideBarView : UIView @end
+@interface AWEAwemeModel : NSObject @end
+@interface AWERelatedMusicAnchorModel : NSObject @end
+@interface AWEMusicExtraModel : NSObject @end
+@interface AWEIMMessageTabOptPushBannerView : UIView @end
 // ============================================
 
 // ==========================================
@@ -105,22 +106,30 @@ static inline BOOL isHomeButton(id btn) {
 
 // 在手指碰到屏幕的瞬间进行实时判断，不依赖页面布局
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    if (isHomeButton(self)) {
-        NSNumber *statusObj = [self valueForKey:@"status"];
-        if (statusObj && [statusObj integerValue] == 2) {
-            // 如果当前已经在 𝑳𝒐𝒗𝒆 页，直接拒绝触摸，点不动！
-            return NO;
+    @try {
+        NSString *label = [self performSelector:@selector(accessibilityLabel)];
+        // 兼容原名“首页”和我们改的新名字“𝑳𝒐𝒗𝒆”
+        if ([label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"]) {
+            NSNumber *statusObj = [self valueForKey:@"status"];
+            if (statusObj && [statusObj integerValue] == 2) {
+                // 如果当前已经在 𝑳𝒐𝒗𝒆 页，直接拒绝触摸，点不动！
+                return NO;
+            }
         }
-    }
+    } @catch(NSException *e) {}
+    
     // 如果在消息页等其他页面，正常放行触摸，允许切回 𝑳𝒐𝒗𝒆 页
     return %orig(point, event);
 }
 
 // 附赠双重保险
 - (BOOL)enableRefresh {
-    if (isHomeButton(self)) {
-        return NO;
-    }
+    @try {
+        NSString *label = [self performSelector:@selector(accessibilityLabel)];
+        if ([label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"]) {
+            return NO;
+        }
+    } @catch(NSException *e) {}
     return %orig;
 }
 %end
