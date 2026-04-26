@@ -21,11 +21,10 @@ static inline BOOL DYYYGetBool(NSString *key) {
 @interface AWERelatedMusicAnchorModel : NSObject @end
 @interface AWEMusicExtraModel : NSObject @end
 @interface AWEIMMessageTabOptPushBannerView : UIView @end
-@interface AWEIMMessagePushHeaderView : UIView @end // 增加备用横幅类
 // ============================================
 
 // ==========================================
-// 功能 1：隐藏双列箭头
+// 功能 1：隐藏双列箭头（✅）
 // ==========================================
 %hook AWEFeedTabJumpGuideView
 - (void)layoutSubviews {
@@ -39,7 +38,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 2：隐藏顶栏横线
+// 功能 2：隐藏顶栏横线（✅）
 // ==========================================
 %hook AWEFeedMultiTabSelectedContainerView
 - (void)layoutSubviews {
@@ -52,7 +51,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 3：禁用下拉刷新视频
+// 功能 3：禁用下拉刷新视频（✅）
 // ==========================================
 %hook AWEFeedTableViewController
 - (BOOL)canRefresh { return NO; }
@@ -68,7 +67,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 4：禁用直播 PCDN
+// 功能 4：禁用直播 PCDN（✅）
 // ==========================================
 %hook HTSLiveStreamPcdnManager
 + (void)start {}
@@ -80,16 +79,18 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 5：将底栏“首页”文字修改为“𝑳𝒐𝒗𝒆”
+// 功能 5：将底栏“首页”文字修改为“𝑳𝒐𝒗𝒆”（🔥 新增）
 // ==========================================
 %hook AWENormalModeTabBarTextView
 - (void)layoutSubviews {
     %orig;
     @try {
         for (UIView *subview in self.subviews) {
+            // 找到底栏的文字标签
             if ([subview isKindOfClass:[UILabel class]]) {
                 UILabel *label = (UILabel *)subview;
                 if ([label.text isEqualToString:@"首页"]) {
+                    // 强行改名！
                     label.text = @"𝑳𝒐𝒗𝒆";
                 }
             }
@@ -99,23 +100,29 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 6：禁用点击首页刷新（实时物理拦截）
+// 功能 6：禁用点击首页刷新（🔥 实时物理拦截，修复卡死 Bug）
 // ==========================================
 %hook AWENormalModeTabBarGeneralButton
+
+// 在手指碰到屏幕的瞬间进行实时判断，不依赖页面布局
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     @try {
         NSString *label = [self performSelector:@selector(accessibilityLabel)];
+        // 兼容原名“首页”和我们改的新名字“𝑳𝒐𝒗𝒆”
         if ([label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"]) {
             NSNumber *statusObj = [self valueForKey:@"status"];
             if (statusObj && [statusObj integerValue] == 2) {
+                // 如果当前已经在 𝑳𝒐𝒗𝒆 页，直接拒绝触摸，点不动！
                 return NO;
             }
         }
     } @catch(NSException *e) {}
     
+    // 如果在消息页等其他页面，正常放行触摸，允许切回 𝑳𝒐𝒗𝒆 页
     return %orig(point, event);
 }
 
+// 附赠双重保险
 - (BOOL)enableRefresh {
     @try {
         NSString *label = [self performSelector:@selector(accessibilityLabel)];
@@ -130,12 +137,14 @@ static inline BOOL DYYYGetBool(NSString *key) {
 // ==========================================
 // 功能 7：隐藏相关搜索 / 观看历史搜索
 // ==========================================
+// 去除隐藏大家都在搜后的留白
 %hook AWESearchAnchorListModel
 - (BOOL)hideWords {
     return DYYYGetBool(@"DYYYHideCommentViews");
 }
 %end
 
+// 隐藏观看历史搜索 / 互动区搜索锚点
 %hook AWEPlayInteractionSearchAnchorView
 - (void)layoutSubviews {
     if (DYYYGetBool(@"DYYYHideInteractionSearch")) {
@@ -149,6 +158,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 // ==========================================
 // 功能 8：隐藏弹出热搜 / 热点框
 // ==========================================
+// 隐藏内部弹出热搜视图
 %hook AWEHotSearchInnerBottomView
 - (void)layoutSubviews {
     if (DYYYGetBool(@"DYYYHideHotSearch")) {
@@ -159,6 +169,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 }
 %end
 
+// 隐藏下面底部热点框数据模型
 %hook AWEHotSpotListModel
 - (BOOL)disableDisplay {
     if (DYYYGetBool(@"DYYYHideHotspot")) return YES;
@@ -184,13 +195,20 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %hook AWEIMMessageTabSideBarView
 - (void)layoutSubviews {
     %orig;
-    if (!DYYYGetBool(@"DYYYHideMessageTabRedPacket")) return;
+
+    if (!DYYYGetBool(@"DYYYHideMessageTabRedPacket")) {
+        return;
+    }
 
     UIView *parentView = self.superview;
-    if (!parentView) return;
+    if (!parentView) {
+        return;
+    }
 
     NSArray<UIView *> *siblings = [parentView.subviews copy];
-    if (siblings.count <= 1) return;
+    if (siblings.count <= 1) {
+        return;
+    }
 
     for (UIView *subview in siblings) {
         if (subview != self) {
@@ -203,17 +221,22 @@ static inline BOOL DYYYGetBool(NSString *key) {
 // ==========================================
 // 功能 10：隐藏去汽水听
 // ==========================================
+// 1. 在 AWEAwemeModel 中屏蔽汽水音乐锚点
 %hook AWEAwemeModel
 - (id)relatedMusicAnchor {
     if (DYYYGetBool(@"DYYYHideQuqishuiting")) return nil;
     return %orig;
 }
 - (void)setRelatedMusicAnchor:(id)anchor {
-    if (DYYYGetBool(@"DYYYHideQuqishuiting")) { %orig(nil); return; }
+    if (DYYYGetBool(@"DYYYHideQuqishuiting")) {
+        %orig(nil);
+        return;
+    }
     %orig;
 }
 %end
 
+// 2. 屏蔽汽水音乐锚点对象本身
 %hook AWERelatedMusicAnchorModel
 - (instancetype)init {
     if (DYYYGetBool(@"DYYYHideQuqishuiting")) return nil;
@@ -225,77 +248,60 @@ static inline BOOL DYYYGetBool(NSString *key) {
 }
 %end
 
+// 3. 屏蔽音乐外带模型中的汽水顶部栏信息
 %hook AWEMusicExtraModel
 - (id)commentTopBarInfo {
     if (DYYYGetBool(@"DYYYHideQuqishuiting")) return nil;
     return %orig;
 }
 - (void)setCommentTopBarInfo:(id)info {
-    if (DYYYGetBool(@"DYYYHideQuqishuiting")) { %orig(nil); return; }
+    if (DYYYGetBool(@"DYYYHideQuqishuiting")) {
+        %orig(nil);
+        return;
+    }
     %orig;
 }
 %end
 
 // ==========================================
-// 功能 11：隐藏消息页打开提醒的横幅 (高度欺骗终极版)
+// 功能 11：隐藏消息页打开提醒的横幅 (精准打击，基因锁死)
 // ==========================================
-
-// 拦截横幅 1：AWEIMMessageTabOptPushBannerView
 %hook AWEIMMessageTabOptPushBannerView
-- (void)layoutSubviews {
-    %orig;
-    if (DYYYGetBool(@"DYYYHidePushBanner")) {
-        self.hidden = YES;
-        self.alpha = 0.0;
-        [self removeFromSuperview];
-    }
-}
-// 强制告诉父容器，我的高度是 0！
-- (CGSize)intrinsicContentSize {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) return CGSizeZero;
-    return %orig;
-}
-- (CGSize)sizeThatFits:(CGSize)size {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) return CGSizeZero;
-    return %orig;
-}
-- (void)setFrame:(CGRect)frame {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) {
-        %orig(CGRectZero);
-    } else {
-        %orig(frame);
-    }
-}
-// 拦截所有可能的高度获取方法
-+ (CGFloat)bannerHeight { return DYYYGetBool(@"DYYYHidePushBanner") ? 0.0 : %orig; }
-- (CGFloat)bannerHeight { return DYYYGetBool(@"DYYYHidePushBanner") ? 0.0 : %orig; }
-+ (CGFloat)defaultHeight { return DYYYGetBool(@"DYYYHidePushBanner") ? 0.0 : %orig; }
-- (CGFloat)defaultHeight { return DYYYGetBool(@"DYYYHidePushBanner") ? 0.0 : %orig; }
-%end
 
-// 拦截横幅 2（备用）：AWEIMMessagePushHeaderView (你也搜过这个，顺手一起干掉)
-%hook AWEIMMessagePushHeaderView
 - (void)layoutSubviews {
     %orig;
     if (DYYYGetBool(@"DYYYHidePushBanner")) {
         self.hidden = YES;
         self.alpha = 0.0;
-        [self removeFromSuperview];
     }
 }
-- (CGSize)intrinsicContentSize {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) return CGSizeZero;
-    return %orig;
+
+// 暴力锁死：只要系统敢设为可见，强行改为隐藏
+- (void)setHidden:(BOOL)hidden {
+    if (DYYYGetBool(@"DYYYHidePushBanner")) { 
+        %orig(YES); 
+        return; 
+    }
+    %orig(hidden);
 }
-- (CGSize)sizeThatFits:(CGSize)size {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) return CGSizeZero;
-    return %orig;
+
+// 暴力锁死：只要系统敢设透明度，强行改为全透明
+- (void)setAlpha:(CGFloat)alpha {
+    if (DYYYGetBool(@"DYYYHidePushBanner")) { 
+        %orig(0.0); 
+        return; 
+    }
+    %orig(alpha);
 }
+
+// 暴力锁死：强制把高度压缩为 0，防止留白
 - (void)setFrame:(CGRect)frame {
     if (DYYYGetBool(@"DYYYHidePushBanner")) {
-        %orig(CGRectZero);
-    } else {
+        frame.size.height = 0;
         %orig(frame);
+        return;
     }
+    %orig(frame);
 }
+
 %end
