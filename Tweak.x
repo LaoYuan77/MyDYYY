@@ -20,11 +20,10 @@ static inline BOOL DYYYGetBool(NSString *key) {
 @interface AWEAwemeModel : NSObject @end
 @interface AWERelatedMusicAnchorModel : NSObject @end
 @interface AWEMusicExtraModel : NSObject @end
-@interface AWEIMMessageTabOptPushBannerView : UIView @end
 // ============================================
 
 // ==========================================
-// 功能 1：隐藏双列箭头（✅）
+// 功能 1：隐藏双列箭头
 // ==========================================
 %hook AWEFeedTabJumpGuideView
 - (void)layoutSubviews {
@@ -38,7 +37,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 2：隐藏顶栏横线（✅）
+// 功能 2：隐藏顶栏横线
 // ==========================================
 %hook AWEFeedMultiTabSelectedContainerView
 - (void)layoutSubviews {
@@ -51,7 +50,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 3：禁用下拉刷新视频（✅）
+// 功能 3：禁用下拉刷新视频
 // ==========================================
 %hook AWEFeedTableViewController
 - (BOOL)canRefresh { return NO; }
@@ -67,7 +66,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 4：禁用直播 PCDN（✅）
+// 功能 4：禁用直播 PCDN
 // ==========================================
 %hook HTSLiveStreamPcdnManager
 + (void)start {}
@@ -79,7 +78,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 5：将底栏“首页”文字修改为“𝑳𝒐𝒗𝒆”（🔥 新增）
+// 功能 5：将底栏“首页”文字修改为“𝑳𝒐𝒗𝒆”
 // ==========================================
 %hook AWENormalModeTabBarTextView
 - (void)layoutSubviews {
@@ -100,7 +99,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 6：禁用点击首页刷新（🔥 实时物理拦截，修复卡死 Bug）
+// 功能 6：禁用点击首页刷新（实时物理拦截）
 // ==========================================
 %hook AWENormalModeTabBarGeneralButton
 
@@ -261,47 +260,4 @@ static inline BOOL DYYYGetBool(NSString *key) {
     }
     %orig;
 }
-%end
-
-// ==========================================
-// 功能 11：隐藏消息页打开提醒的横幅 (精准打击，基因锁死)
-// ==========================================
-%hook AWEIMMessageTabOptPushBannerView
-
-- (void)layoutSubviews {
-    %orig;
-    if (DYYYGetBool(@"DYYYHidePushBanner")) {
-        self.hidden = YES;
-        self.alpha = 0.0;
-    }
-}
-
-// 暴力锁死：只要系统敢设为可见，强行改为隐藏
-- (void)setHidden:(BOOL)hidden {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) { 
-        %orig(YES); 
-        return; 
-    }
-    %orig(hidden);
-}
-
-// 暴力锁死：只要系统敢设透明度，强行改为全透明
-- (void)setAlpha:(CGFloat)alpha {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) { 
-        %orig(0.0); 
-        return; 
-    }
-    %orig(alpha);
-}
-
-// 暴力锁死：强制把高度压缩为 0，防止留白
-- (void)setFrame:(CGRect)frame {
-    if (DYYYGetBool(@"DYYYHidePushBanner")) {
-        frame.size.height = 0;
-        %orig(frame);
-        return;
-    }
-    %orig(frame);
-}
-
 %end
