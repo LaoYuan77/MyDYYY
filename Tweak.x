@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h> // <-- 新增：支持 Ivar 运行时函数，防止编译报错
 
 // ========== 工具函数：替代缺失的 DYYYGetBool ==========
 static inline BOOL DYYYGetBool(NSString *key) {
@@ -218,14 +219,48 @@ static inline BOOL DYYYGetBool(NSString *key) {
 %end
 
 // ==========================================
-// 功能 10：隐藏去汽水听
+// 功能 10 & 12：隐藏去汽水听按钮 / 刷到带汽水音乐的视频直接跳过
 // ==========================================
-// 1. 在 AWEAwemeModel 中屏蔽汽水音乐锚点
+// 1. 拦截 AWEAwemeModel，实现数据过滤与 UI 隐藏
 %hook AWEAwemeModel
+
+// 拦截视频数据的初始化过程（这是源码中用于过滤信息流的核心入口）
+- (instancetype)initWithDictionary:(id)dict error:(NSError **)error {
+    id orig = %orig;
+    
+    // 如果解析出了视频数据，并且命中过滤规则，就直接返回 nil（把这条视频丢弃）
+    if (orig && [orig contentFilter]) {
+        return nil;
+    }
+    
+    return orig;
+}
+
+// 新增一个方法，专门用来判断这个视频要不要被过滤
+%new
+- (BOOL)contentFilter {
+    // 读取开关
+    BOOL skipMusic = DYYYGetBool(@"DYYYHideQuqishuiting");
+    
+    // 注意：为了不被下面返回 nil 的 Hook 影响，这里使用 Ivar (实例变量) 绕过 Getter 方法直接读取底层数据
+    id realAnchor = nil;
+    Ivar anchorIvar = class_getInstanceVariable([self class], "_relatedMusicAnchor");
+    if (anchorIvar) {
+        realAnchor = object_getIvar(self, anchorIvar);
+    }
+    
+    // 如果开关打开，并且底层确实存在汽水音乐的锚点数据，就标记为需要过滤
+    BOOL shouldFilterQishui = skipMusic && realAnchor != nil;
+    
+    return shouldFilterQishui;
+}
+
+// 隐藏汽水音乐锚点 (UI 层面：防止某些没被过滤掉的场景下依然露馅)
 - (id)relatedMusicAnchor {
     if (DYYYGetBool(@"DYYYHideQuqishuiting")) return nil;
     return %orig;
 }
+
 - (void)setRelatedMusicAnchor:(id)anchor {
     if (DYYYGetBool(@"DYYYHideQuqishuiting")) {
         %orig(nil);
@@ -233,6 +268,7 @@ static inline BOOL DYYYGetBool(NSString *key) {
     }
     %orig;
 }
+
 %end
 
 // 2. 屏蔽汽水音乐锚点对象本身
