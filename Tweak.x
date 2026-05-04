@@ -18,9 +18,13 @@ static inline BOOL DYYYGetBool(NSString *key) {
 @interface AWEHotSearchInnerBottomView : UIView @end
 @interface AWEHotSpotListModel : NSObject @end
 @interface AWEIMMessageTabSideBarView : UIView @end
-@interface AWEAwemeModel : NSObject @end
 @interface AWERelatedMusicAnchorModel : NSObject @end
 @interface AWEMusicExtraModel : NSObject @end
+
+// 修复 contentFilter 编译报错
+@interface AWEAwemeModel : NSObject 
+- (BOOL)contentFilter;
+@end
 // ============================================
 
 // ==========================================
@@ -296,4 +300,31 @@ static inline BOOL DYYYGetBool(NSString *key) {
     }
     %orig;
 }
+%end
+
+// ==========================================
+// 功能 11：屏蔽版本更新
+// ==========================================
+%hook AWEVersionUpdateManager
+
+- (void)startVersionUpdateWorkflow:(id)arg1 completion:(id)arg2 {
+    if (DYYYGetBool(@"DYYYNoUpdates")) {
+        // 直接执行完成回调，假装处理完毕
+        if (arg2) {
+            void (^completionBlock)(void) = arg2;
+            completionBlock();
+        }
+    } else {
+        %orig;
+    }
+}
+
+- (id)workflow {
+    return DYYYGetBool(@"DYYYNoUpdates") ? nil : %orig;
+}
+
+- (id)badgeModule {
+    return DYYYGetBool(@"DYYYNoUpdates") ? nil : %orig;
+}
+
 %end
