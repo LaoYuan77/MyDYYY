@@ -1,5 +1,5 @@
 #import <UIKit/UIKit.h>
-#import <objc/runtime.h> 
+#import <objc/runtime.h>
 
 // ========== 工具函数：强制所有开关默认生效 ==========
 static inline BOOL DYYYGetBool(NSString *key) {
@@ -60,6 +60,247 @@ static inline BOOL DYYYIsUpdateAlertText(NSString *text) {
     return hasVersionWord && hasUpdateActionWord;
 }
 
+// ========== 自定义更新弹窗文本收集 / 判断 ==========
+static inline void DYYYAppendText(NSMutableString *result, id value) {
+    if (!value) return;
+
+    @try {
+        if ([value isKindOfClass:[NSString class]]) {
+            NSString *str = (NSString *)value;
+            if (str.length > 0) {
+                [result appendString:str];
+                [result appendString:@" "];
+            }
+        } else if ([value respondsToSelector:@selector(string)]) {
+            NSString *str = [value string];
+            if (str.length > 0) {
+                [result appendString:str];
+                [result appendString:@" "];
+            }
+        }
+    } @catch (NSException *e) {}
+}
+
+static NSString *DYYYCollectViewText(UIView *view, NSInteger depth) {
+    if (!view || depth > 8) return @"";
+
+    NSMutableString *result = [NSMutableString string];
+
+    @try {
+        DYYYAppendText(result, view.accessibilityLabel);
+        DYYYAppendText(result, view.accessibilityValue);
+        DYYYAppendText(result, view.accessibilityHint);
+
+        if ([view isKindOfClass:[UILabel class]]) {
+            UILabel *label = (UILabel *)view;
+            DYYYAppendText(result, label.text);
+            DYYYAppendText(result, label.attributedText);
+        }
+
+        if ([view isKindOfClass:[UIButton class]]) {
+            UIButton *button = (UIButton *)view;
+
+            NSArray *states = @[
+                @(UIControlStateNormal),
+                @(UIControlStateHighlighted),
+                @(UIControlStateSelected),
+                @(UIControlStateDisabled)
+            ];
+
+            for (NSNumber *stateObj in states) {
+                UIControlState state = [stateObj unsignedIntegerValue];
+                DYYYAppendText(result, [button titleForState:state]);
+                DYYYAppendText(result, [button attributedTitleForState:state]);
+            }
+
+            DYYYAppendText(result, button.titleLabel.text);
+            DYYYAppendText(result, button.titleLabel.attributedText);
+        }
+
+        if ([view isKindOfClass:[UITextView class]]) {
+            UITextView *textView = (UITextView *)view;
+            DYYYAppendText(result, textView.text);
+            DYYYAppendText(result, textView.attributedText);
+        }
+
+        if ([view isKindOfClass:[UITextField class]]) {
+            UITextField *textField = (UITextField *)view;
+            DYYYAppendText(result, textField.text);
+            DYYYAppendText(result, textField.attributedText);
+            DYYYAppendText(result, textField.placeholder);
+        }
+
+        // 兼容抖音自定义 Label / Button，很多不是 UILabel/UIButton
+        for (NSString *key in @[@"text", @"title", @"subtitle", @"message", @"attributedText", @"attributedTitle"]) {
+            @try {
+                id value = [view valueForKey:key];
+                DYYYAppendText(result, value);
+            } @catch (NSException *e) {}
+        }
+
+        NSArray<UIView *> *subviews = [view.subviews copy];
+        for (UIView *subview in subviews) {
+            NSString *subText = DYYYCollectViewText(subview, depth + 1);
+            DYYYAppendText(result, subText);
+        }
+    } @catch (NSException *e) {}
+
+    return result;
+}
+
+static inline BOOL DYYYIsCustomUpdateText(NSString *text) {
+    if (!text || text.length == 0) return NO;
+
+    // 复用原来的更新文本判断
+    if (DYYYIsUpdateAlertText(text)) return YES;
+
+    BOOL hasDouyinUpdateTitle =
+        [text containsString:@"抖音有新版本"] ||
+        [text containsString:@"有新版本啦"];
+
+    BOOL hasUpdateButton =
+        [text containsString:@"立即升级"] ||
+        [text containsString:@"立即更新"] ||
+        [text containsString:@"马上升级"] ||
+        [text containsString:@"马上更新"];
+
+    BOOL hasLaterButton =
+        [text containsString:@"以后再说"] ||
+        [text containsString:@"稍后再说"] ||
+        [text containsString:@"下次再说"];
+
+    BOOL hasAppStoreText =
+        [text containsString:@"App Store"] ||
+        [text containsString:@"前往 App Store"];
+
+    BOOL hasFeatureText =
+        [text containsString:@"新功能"] ||
+        [text containsString:@"更流畅"] ||
+        [text containsString:@"更稳定"];
+
+    return
+        (hasDouyinUpdateTitle && (hasUpdateButton || hasAppStoreText || hasFeatureText)) ||
+        (hasUpdateButton && hasLaterButton) ||
+        (hasAppStoreText && ([text containsString:@"升级"] || [text containsString:@"更新"]));
+}
+
+static inline BOOL DYYYLooksLikeCardView(UIView *view) {
+    if (!view || !view.window) return NO;
+
+    CGSize screenSize = UIScreen.mainScreen.bounds.size;
+    CGFloat screenW = screenSize.width;
+    CGFloat screenH = screenSize.height;
+
+    CGFloat w = view.bounds.size.width;
+    CGFloat h = view.bounds.size.height;
+
+    if (w <= 0 || h <= 0) return NO;
+
+    // 白色弹窗卡片：不是全屏，但尺寸明显大于普通按钮/Label
+    return
+        w >= 160 &&
+        h >= 120 &&
+        w <= screenW * 0.96 &&
+        h <= screenH * 0.86;
+}
+
+static inline BOOL DYYYLooksLikeFullOverlay(UIView *view) {
+    if (!view || !view.window) return NO;
+
+    CGSize screenSize = UIScreen.mainScreen.bounds.size;
+    CGFloat screenW = screenSize.width;
+    CGFloat screenH = screenSize.height;
+
+    CGFloat w = view.bounds.size.width;
+    CGFloat h = view.bounds.size.height;
+
+    return
+        w >= screenW * 0.85 &&
+        h >= screenH * 0.70;
+}
+
+static UIView *DYYYFindUpdatePopupTarget(UIView *fromView) {
+    if (!fromView || !fromView.window) return nil;
+
+    UIView *view = fromView;
+    UIView *card = nil;
+
+    // 先找包含更新文案的弹窗卡片
+    while (view && ![view isKindOfClass:[UIWindow class]]) {
+        NSString *text = DYYYCollectViewText(view, 0);
+
+        if (DYYYIsCustomUpdateText(text) && DYYYLooksLikeCardView(view)) {
+            card = view;
+            break;
+        }
+
+        view = view.superview;
+    }
+
+    if (!card) {
+        // 如果传进来的就是整层蒙版，直接判断它本身
+        NSString *text = DYYYCollectViewText(fromView, 0);
+        if (DYYYIsCustomUpdateText(text) && DYYYLooksLikeFullOverlay(fromView)) {
+            return fromView;
+        }
+
+        return nil;
+    }
+
+    UIView *target = card;
+    UIView *parent = card.superview;
+    NSInteger upCount = 0;
+
+    // 如果卡片外面包着全屏灰黑蒙版，把蒙版一起删掉，避免只删白框后页面还被遮住
+    while (parent && ![parent isKindOfClass:[UIWindow class]] && upCount < 4) {
+        if (DYYYLooksLikeFullOverlay(parent) && parent.subviews.count <= 8) {
+            target = parent;
+        }
+
+        parent = parent.superview;
+        upCount++;
+    }
+
+    return target;
+}
+
+static inline void DYYYTryRemoveCustomUpdatePopup(UIView *view) {
+    if (!DYYYGetBool(@"DYYYNoUpdates")) return;
+    if (!view || !view.window) return;
+
+    @try {
+        UIView *target = DYYYFindUpdatePopupTarget(view);
+
+        if (target && ![target isKindOfClass:[UIWindow class]]) {
+            NSString *text = DYYYCollectViewText(target, 0);
+            NSLog(@"[DYYY UpdateBlock] remove custom update view: %@ text: %@",
+                  NSStringFromClass([target class]),
+                  text);
+
+            target.hidden = YES;
+            target.alpha = 0.0;
+            [target removeFromSuperview];
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[DYYY UpdateBlock] custom view block exception: %@", e);
+    }
+}
+
+static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
+    if (!url) return NO;
+
+    NSString *scheme = url.scheme.lowercaseString ?: @"";
+    NSString *host = url.host.lowercaseString ?: @"";
+    NSString *absolute = url.absoluteString.lowercaseString ?: @"";
+
+    if ([scheme hasPrefix:@"itms"]) return YES;
+    if ([host containsString:@"apps.apple.com"]) return YES;
+    if ([host containsString:@"itunes.apple.com"]) return YES;
+    if ([absolute containsString:@"appstore"]) return YES;
+
+    return NO;
+}
+
 // ========== 身份声明，防止编译报错 ==========
 @interface AWEFeedTabJumpGuideView : UIView @end
 @interface AWEFeedMultiTabSelectedContainerView : UIView @end
@@ -78,7 +319,7 @@ static inline BOOL DYYYIsUpdateAlertText(NSString *text) {
 @interface AWEMusicExtraModel : NSObject @end
 
 // 修复 contentFilter 编译报错
-@interface AWEAwemeModel : NSObject 
+@interface AWEAwemeModel : NSObject
 - (BOOL)contentFilter;
 @end
 
@@ -467,7 +708,7 @@ static inline BOOL DYYYIsUpdateAlertText(NSString *text) {
 %end
 
 // ==========================================
-// 更新弹窗兜底：拦截 UIAlertController 类型的版本更新弹窗
+// 更新弹窗兜底 1：拦截 UIAlertController 类型的版本更新弹窗
 // ==========================================
 %hook UIViewController
 
@@ -513,6 +754,70 @@ static inline BOOL DYYYIsUpdateAlertText(NSString *text) {
     }
 
     %orig(viewControllerToPresent, flag, completion);
+}
+
+%end
+
+// ==========================================
+// 更新弹窗兜底 2：拦截抖音自定义 UIView 更新弹窗
+// 适配“抖音有新版本啦 / 立即升级 / 以后再说”
+// ==========================================
+%hook UIView
+
+- (void)didMoveToWindow {
+    %orig;
+
+    if (!self.window) return;
+
+    DYYYTryRemoveCustomUpdatePopup(self);
+
+    UIView *view = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        DYYYTryRemoveCustomUpdatePopup(view);
+    });
+}
+
+- (void)addSubview:(UIView *)view {
+    %orig(view);
+
+    DYYYTryRemoveCustomUpdatePopup(view);
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        DYYYTryRemoveCustomUpdatePopup(view);
+    });
+}
+
+%end
+
+// ==========================================
+// 更新跳转兜底：防止点“立即升级”后跳 App Store
+// ==========================================
+%hook UIApplication
+
+- (BOOL)openURL:(NSURL *)url {
+    if (DYYYGetBool(@"DYYYNoUpdates") && DYYYShouldBlockUpdateURL(url)) {
+        NSLog(@"[DYYY UpdateBlock] blocked openURL: %@", url);
+        return NO;
+    }
+
+    return %orig(url);
+}
+
+- (void)openURL:(NSURL *)url
+        options:(NSDictionary *)options
+completionHandler:(void (^)(BOOL success))completion {
+
+    if (DYYYGetBool(@"DYYYNoUpdates") && DYYYShouldBlockUpdateURL(url)) {
+        NSLog(@"[DYYY UpdateBlock] blocked openURL options: %@", url);
+
+        if (completion) {
+            completion(NO);
+        }
+
+        return;
+    }
+
+    %orig(url, options, completion);
 }
 
 %end
