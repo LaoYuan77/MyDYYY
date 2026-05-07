@@ -1,198 +1,10 @@
 #import <UIKit/UIKit.h>
-#import <objc/runtime.h>
+#import <objc/runtime.h> 
 
 // ========== 工具函数：强制所有开关默认生效 ==========
 static inline BOOL DYYYGetBool(NSString *key) {
     // 既然没有 UI 设置面板，直接让所有开关判断永远返回 YES
     return YES;
-}
-
-
-// ========== 更新拦截记录：静默记录 + 摇一摇查看 ==========
-static NSString *const DYYYUpdateBlockCountKey = @"DYYYUpdateBlockCount";
-static NSString *const DYYYUpdateBlockLastTimeKey = @"DYYYUpdateBlockLastTime";
-static NSString *const DYYYUpdateBlockLastSourceKey = @"DYYYUpdateBlockLastSource";
-static NSString *const DYYYUpdateBlockLastTextKey = @"DYYYUpdateBlockLastText";
-
-static inline NSString *DYYYCurrentTimeString(void) {
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
-    formatter.dateFormat = @"yyyy-MM-dd HH:mm:ss";
-    return [formatter stringFromDate:[NSDate date]];
-}
-
-static inline NSString *DYYYSafeRecordText(NSString *text) {
-    if (!text || text.length == 0) return @"";
-
-    NSString *result = [text stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
-    result = [result stringByReplacingOccurrencesOfString:@"\r" withString:@" "];
-    result = [result stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-
-    while ([result containsString:@"  "]) {
-        result = [result stringByReplacingOccurrencesOfString:@"  " withString:@" "];
-    }
-
-    // 避免调试框过长
-    if (result.length > 700) {
-        result = [[result substringToIndex:700] stringByAppendingString:@"..."];
-    }
-
-    return result;
-}
-
-static inline void DYYYRecordUpdateBlock(NSString *source, NSString *text) {
-    @try {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        NSInteger count = [defaults integerForKey:DYYYUpdateBlockCountKey];
-
-        [defaults setInteger:(count + 1) forKey:DYYYUpdateBlockCountKey];
-        [defaults setObject:DYYYCurrentTimeString() forKey:DYYYUpdateBlockLastTimeKey];
-        [defaults setObject:DYYYSafeRecordText(source ?: @"未知来源") forKey:DYYYUpdateBlockLastSourceKey];
-        [defaults setObject:DYYYSafeRecordText(text ?: @"") forKey:DYYYUpdateBlockLastTextKey];
-        [defaults synchronize];
-    } @catch (NSException *e) {}
-}
-
-static UIWindow *DYYYFindActiveWindow(void) {
-    UIApplication *app = [UIApplication sharedApplication];
-    UIWindow *candidateWindow = nil;
-
-    @try {
-        if (@available(iOS 13.0, *)) {
-            // iOS 13+ 不使用已废弃的 keyWindow / windows，避免 Xcode 16 开启 -Werror 后编译失败
-            NSSet<UIScene *> *scenes = app.connectedScenes;
-
-            for (UIScene *scene in scenes) {
-                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-
-                if (scene.activationState != UISceneActivationStateForegroundActive &&
-                    scene.activationState != UISceneActivationStateForegroundInactive) {
-                    continue;
-                }
-
-                UIWindowScene *windowScene = (UIWindowScene *)scene;
-                for (UIWindow *window in windowScene.windows) {
-                    if (window.isKeyWindow) {
-                        return window;
-                    }
-
-                    if (!candidateWindow && !window.hidden && window.alpha > 0.01 && window.rootViewController) {
-                        candidateWindow = window;
-                    }
-                }
-            }
-
-            if (candidateWindow) return candidateWindow;
-
-            // 兜底：有些注入场景 activationState 不稳定，再扫一遍所有 scene 的 window
-            for (UIScene *scene in scenes) {
-                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-
-                UIWindowScene *windowScene = (UIWindowScene *)scene;
-                for (UIWindow *window in windowScene.windows) {
-                    if (window.isKeyWindow) {
-                        return window;
-                    }
-
-                    if (!candidateWindow && !window.hidden && window.alpha > 0.01 && window.rootViewController) {
-                        candidateWindow = window;
-                    }
-                }
-            }
-        } else {
-            // iOS 12 及以下兜底：用 KVC 避免直接调用已废弃属性导致 -Werror 编译失败
-            NSArray<UIWindow *> *windows = [app valueForKey:@"windows"];
-
-            for (UIWindow *window in windows) {
-                if (window.isKeyWindow) {
-                    return window;
-                }
-
-                if (!candidateWindow && !window.hidden && window.alpha > 0.01 && window.rootViewController) {
-                    candidateWindow = window;
-                }
-            }
-        }
-    } @catch (NSException *e) {}
-
-    return candidateWindow;
-}
-
-static UIViewController *DYYYTopViewController(void) {
-    UIWindow *keyWindow = DYYYFindActiveWindow();
-    if (!keyWindow) return nil;
-
-    UIViewController *vc = keyWindow.rootViewController;
-
-    BOOL changed = YES;
-    while (changed && vc) {
-        changed = NO;
-
-        if (vc.presentedViewController) {
-            vc = vc.presentedViewController;
-            changed = YES;
-            continue;
-        }
-
-        if ([vc isKindOfClass:[UINavigationController class]]) {
-            UIViewController *visibleVC = ((UINavigationController *)vc).visibleViewController;
-            if (visibleVC) {
-                vc = visibleVC;
-                changed = YES;
-                continue;
-            }
-        }
-
-        if ([vc isKindOfClass:[UITabBarController class]]) {
-            UIViewController *selectedVC = ((UITabBarController *)vc).selectedViewController;
-            if (selectedVC) {
-                vc = selectedVC;
-                changed = YES;
-                continue;
-            }
-        }
-    }
-
-    return vc;
-}
-
-static void DYYYShowUpdateBlockDebugPanel(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        @try {
-            UIViewController *vc = DYYYTopViewController();
-            if (!vc || [vc isKindOfClass:[UIAlertController class]]) return;
-
-            NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-            NSInteger count = [defaults integerForKey:DYYYUpdateBlockCountKey];
-            NSString *time = [defaults stringForKey:DYYYUpdateBlockLastTimeKey] ?: @"暂无";
-            NSString *source = [defaults stringForKey:DYYYUpdateBlockLastSourceKey] ?: @"暂无";
-            NSString *lastText = [defaults stringForKey:DYYYUpdateBlockLastTextKey] ?: @"暂无";
-
-            NSString *message = [NSString stringWithFormat:
-                @"拦截次数（流程/弹窗/跳转）：%ld\n最近时间：%@\n最近来源：%@\n\n最近文案：\n%@",
-                (long)count,
-                time,
-                source,
-                lastText
-            ];
-
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"DYYY 更新拦截状态"
-                                                                           message:message
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-
-            [alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleCancel handler:nil]];
-            [alert addAction:[UIAlertAction actionWithTitle:@"清空记录" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-                NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-                [defaults removeObjectForKey:DYYYUpdateBlockCountKey];
-                [defaults removeObjectForKey:DYYYUpdateBlockLastTimeKey];
-                [defaults removeObjectForKey:DYYYUpdateBlockLastSourceKey];
-                [defaults removeObjectForKey:DYYYUpdateBlockLastTextKey];
-                [defaults synchronize];
-            }]];
-
-            [vc presentViewController:alert animated:YES completion:nil];
-        } @catch (NSException *e) {}
-    });
 }
 
 // ========== 更新弹窗文本判断 ==========
@@ -212,7 +24,9 @@ static inline BOOL DYYYIsUpdateAlertText(NSString *text) {
     if (!text || text.length == 0) return NO;
 
     // 避免把摇一摇调试框误判成更新弹窗
-    if ([text containsString:@"DYYY 更新拦截状态"] || [text containsString:@"拦截次数（流程/弹窗/跳转）"]) {
+    if ([text containsString:@"DYYY 更新拦截状态"] ||
+        [text containsString:@"拦截次数"] ||
+        [text containsString:@"最近文案"]) {
         return NO;
     }
 
@@ -253,88 +67,197 @@ static inline BOOL DYYYIsUpdateAlertText(NSString *text) {
     return hasVersionWord && hasUpdateActionWord;
 }
 
-// ========== 自定义更新弹窗文本收集 / 判断 ==========
-static inline void DYYYAppendText(NSMutableString *result, id value) {
-    if (!value) return;
+
+// ========== 更新拦截记录：静默记录 + 摇一摇查看 ==========
+static NSString *const DYYYUpdateBlockCountKey = @"DYYYUpdateBlockCount";
+static NSString *const DYYYUpdateBlockLastTimeKey = @"DYYYUpdateBlockLastTime";
+static NSString *const DYYYUpdateBlockLastSourceKey = @"DYYYUpdateBlockLastSource";
+static NSString *const DYYYUpdateBlockLastTextKey = @"DYYYUpdateBlockLastText";
+
+static inline NSString *DYYYCurrentTimeString(void) {
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
+    formatter.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+    return [formatter stringFromDate:[NSDate date]];
+}
+
+static inline NSString *DYYYSafeRecordText(NSString *text) {
+    if (!text || text.length == 0) return @"";
+
+    NSString *result = [text stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
+    result = [result stringByReplacingOccurrencesOfString:@"\r" withString:@" "];
+    result = [result stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+    while ([result containsString:@"  "]) {
+        result = [result stringByReplacingOccurrencesOfString:@"  " withString:@" "];
+    }
+
+    if (result.length > 700) {
+        result = [[result substringToIndex:700] stringByAppendingString:@"..."];
+    }
+
+    return result;
+}
+
+static inline void DYYYRecordUpdateBlock(NSString *source, NSString *text) {
+    @try {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        NSInteger count = [defaults integerForKey:DYYYUpdateBlockCountKey];
+
+        [defaults setInteger:(count + 1) forKey:DYYYUpdateBlockCountKey];
+        [defaults setObject:DYYYCurrentTimeString() forKey:DYYYUpdateBlockLastTimeKey];
+        [defaults setObject:DYYYSafeRecordText(source ?: @"未知来源") forKey:DYYYUpdateBlockLastSourceKey];
+        [defaults setObject:DYYYSafeRecordText(text ?: @"") forKey:DYYYUpdateBlockLastTextKey];
+    } @catch (NSException *e) {}
+}
+
+static NSArray<UIWindow *> *DYYYAllWindows(void) {
+    NSMutableArray<UIWindow *> *result = [NSMutableArray array];
 
     @try {
+        UIApplication *app = [UIApplication sharedApplication];
+
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *scene in app.connectedScenes) {
+                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                for (UIWindow *window in windowScene.windows) {
+                    if (window && ![result containsObject:window]) {
+                        [result addObject:window];
+                    }
+                }
+            }
+        }
+
+        // 用 KVC 兜底，避免直接调用 UIApplication.windows / keyWindow 触发 deprecated 编译错误
+        NSArray *windows = [app valueForKey:@"windows"];
+        for (id obj in windows) {
+            if ([obj isKindOfClass:[UIWindow class]] && ![result containsObject:obj]) {
+                [result addObject:obj];
+            }
+        }
+    } @catch (NSException *e) {}
+
+    return result;
+}
+
+static UIWindow *DYYYFindActiveWindow(void) {
+    UIWindow *fallback = nil;
+
+    for (UIWindow *window in DYYYAllWindows()) {
+        if (window.hidden || window.alpha <= 0.01) continue;
+
+        if (window.isKeyWindow) return window;
+
+        if (!fallback && window.rootViewController) {
+            fallback = window;
+        }
+    }
+
+    return fallback;
+}
+
+static UIViewController *DYYYTopViewController(void) {
+    UIWindow *window = DYYYFindActiveWindow();
+    if (!window) return nil;
+
+    UIViewController *vc = window.rootViewController;
+
+    @try {
+        BOOL changed = YES;
+        while (changed && vc) {
+            changed = NO;
+
+            if (vc.presentedViewController) {
+                vc = vc.presentedViewController;
+                changed = YES;
+                continue;
+            }
+
+            if ([vc isKindOfClass:[UINavigationController class]]) {
+                UIViewController *visibleVC = ((UINavigationController *)vc).visibleViewController;
+                if (visibleVC) {
+                    vc = visibleVC;
+                    changed = YES;
+                    continue;
+                }
+            }
+
+            if ([vc isKindOfClass:[UITabBarController class]]) {
+                UIViewController *selectedVC = ((UITabBarController *)vc).selectedViewController;
+                if (selectedVC) {
+                    vc = selectedVC;
+                    changed = YES;
+                    continue;
+                }
+            }
+        }
+    } @catch (NSException *e) {}
+
+    return vc;
+}
+
+static inline void DYYYAppendLimitedText(NSMutableString *result, id value) {
+    if (!result || !value || result.length > 3000) return;
+
+    @try {
+        NSString *text = nil;
+
         if ([value isKindOfClass:[NSString class]]) {
-            NSString *str = (NSString *)value;
-            if (str.length > 0) {
-                [result appendString:str];
-                [result appendString:@" "];
-            }
+            text = (NSString *)value;
         } else if ([value respondsToSelector:@selector(string)]) {
-            NSString *str = [value string];
-            if (str.length > 0) {
-                [result appendString:str];
-                [result appendString:@" "];
-            }
+            text = [value string];
+        }
+
+        if (text.length > 0) {
+            [result appendString:text];
+            [result appendString:@" "];
         }
     } @catch (NSException *e) {}
 }
 
-static NSString *DYYYCollectViewText(UIView *view, NSInteger depth) {
-    if (!view || depth > 8) return @"";
+static NSString *DYYYCollectVisibleViewText(UIView *view, NSInteger depth) {
+    if (!view || depth > 7) return @"";
+    if (view.hidden || view.alpha <= 0.01) return @"";
 
     NSMutableString *result = [NSMutableString string];
 
     @try {
-        DYYYAppendText(result, view.accessibilityLabel);
-        DYYYAppendText(result, view.accessibilityValue);
-        DYYYAppendText(result, view.accessibilityHint);
+        DYYYAppendLimitedText(result, view.accessibilityLabel);
+        DYYYAppendLimitedText(result, view.accessibilityValue);
+        DYYYAppendLimitedText(result, view.accessibilityHint);
 
         if ([view isKindOfClass:[UILabel class]]) {
             UILabel *label = (UILabel *)view;
-            DYYYAppendText(result, label.text);
-            DYYYAppendText(result, label.attributedText);
-        }
-
-        if ([view isKindOfClass:[UIButton class]]) {
+            DYYYAppendLimitedText(result, label.text);
+            DYYYAppendLimitedText(result, label.attributedText);
+        } else if ([view isKindOfClass:[UIButton class]]) {
             UIButton *button = (UIButton *)view;
+            UIControlState states[] = {UIControlStateNormal, UIControlStateHighlighted, UIControlStateSelected, UIControlStateDisabled};
 
-            NSArray *states = @[
-                @(UIControlStateNormal),
-                @(UIControlStateHighlighted),
-                @(UIControlStateSelected),
-                @(UIControlStateDisabled)
-            ];
-
-            for (NSNumber *stateObj in states) {
-                UIControlState state = [stateObj unsignedIntegerValue];
-                DYYYAppendText(result, [button titleForState:state]);
-                DYYYAppendText(result, [button attributedTitleForState:state]);
+            for (int i = 0; i < 4; i++) {
+                DYYYAppendLimitedText(result, [button titleForState:states[i]]);
+                DYYYAppendLimitedText(result, [button attributedTitleForState:states[i]]);
             }
 
-            DYYYAppendText(result, button.titleLabel.text);
-            DYYYAppendText(result, button.titleLabel.attributedText);
-        }
-
-        if ([view isKindOfClass:[UITextView class]]) {
+            DYYYAppendLimitedText(result, button.titleLabel.text);
+            DYYYAppendLimitedText(result, button.titleLabel.attributedText);
+        } else if ([view isKindOfClass:[UITextView class]]) {
             UITextView *textView = (UITextView *)view;
-            DYYYAppendText(result, textView.text);
-            DYYYAppendText(result, textView.attributedText);
-        }
-
-        if ([view isKindOfClass:[UITextField class]]) {
+            DYYYAppendLimitedText(result, textView.text);
+            DYYYAppendLimitedText(result, textView.attributedText);
+        } else if ([view isKindOfClass:[UITextField class]]) {
             UITextField *textField = (UITextField *)view;
-            DYYYAppendText(result, textField.text);
-            DYYYAppendText(result, textField.attributedText);
-            DYYYAppendText(result, textField.placeholder);
-        }
-
-        // 兼容抖音自定义 Label / Button，很多不是 UILabel/UIButton
-        for (NSString *key in @[@"text", @"title", @"subtitle", @"message", @"attributedText", @"attributedTitle"]) {
-            @try {
-                id value = [view valueForKey:key];
-                DYYYAppendText(result, value);
-            } @catch (NSException *e) {}
+            DYYYAppendLimitedText(result, textField.text);
+            DYYYAppendLimitedText(result, textField.attributedText);
+            DYYYAppendLimitedText(result, textField.placeholder);
         }
 
         NSArray<UIView *> *subviews = [view.subviews copy];
         for (UIView *subview in subviews) {
-            NSString *subText = DYYYCollectViewText(subview, depth + 1);
-            DYYYAppendText(result, subText);
+            if (result.length > 3000) break;
+            DYYYAppendLimitedText(result, DYYYCollectVisibleViewText(subview, depth + 1));
         }
     } @catch (NSException *e) {}
 
@@ -343,18 +266,12 @@ static NSString *DYYYCollectViewText(UIView *view, NSInteger depth) {
 
 static inline BOOL DYYYIsCustomUpdateText(NSString *text) {
     if (!text || text.length == 0) return NO;
-
-    // 避免把摇一摇调试框误判成自定义更新弹窗
-    if ([text containsString:@"DYYY 更新拦截状态"] || [text containsString:@"拦截次数（流程/弹窗/跳转）"]) {
-        return NO;
-    }
-
-    // 复用原来的更新文本判断
     if (DYYYIsUpdateAlertText(text)) return YES;
 
     BOOL hasDouyinUpdateTitle =
         [text containsString:@"抖音有新版本"] ||
-        [text containsString:@"有新版本啦"];
+        [text containsString:@"有新版本啦"] ||
+        [text containsString:@"发现新版本"];
 
     BOOL hasUpdateButton =
         [text containsString:@"立即升级"] ||
@@ -382,76 +299,41 @@ static inline BOOL DYYYIsCustomUpdateText(NSString *text) {
         (hasAppStoreText && ([text containsString:@"升级"] || [text containsString:@"更新"]));
 }
 
-static inline BOOL DYYYLooksLikeCardView(UIView *view) {
-    if (!view || !view.window) return NO;
+static inline BOOL DYYYLooksLikePopupCard(UIView *view) {
+    if (!view) return NO;
 
     CGSize screenSize = UIScreen.mainScreen.bounds.size;
     CGFloat screenW = screenSize.width;
     CGFloat screenH = screenSize.height;
-
     CGFloat w = view.bounds.size.width;
     CGFloat h = view.bounds.size.height;
 
     if (w <= 0 || h <= 0) return NO;
 
-    // 白色弹窗卡片：不是全屏，但尺寸明显大于普通按钮/Label
-    return
-        w >= 160 &&
-        h >= 120 &&
-        w <= screenW * 0.96 &&
-        h <= screenH * 0.86;
+    return w >= 160 && h >= 110 && w <= screenW * 0.98 && h <= screenH * 0.88;
 }
 
-static inline BOOL DYYYLooksLikeFullOverlay(UIView *view) {
-    if (!view || !view.window) return NO;
+static inline BOOL DYYYLooksLikeOverlay(UIView *view) {
+    if (!view) return NO;
 
     CGSize screenSize = UIScreen.mainScreen.bounds.size;
     CGFloat screenW = screenSize.width;
     CGFloat screenH = screenSize.height;
-
     CGFloat w = view.bounds.size.width;
     CGFloat h = view.bounds.size.height;
 
-    return
-        w >= screenW * 0.85 &&
-        h >= screenH * 0.70;
+    return w >= screenW * 0.85 && h >= screenH * 0.70;
 }
 
-static UIView *DYYYFindUpdatePopupTarget(UIView *fromView) {
-    if (!fromView || !fromView.window) return nil;
-
-    UIView *view = fromView;
-    UIView *card = nil;
-
-    // 先找包含更新文案的弹窗卡片
-    while (view && ![view isKindOfClass:[UIWindow class]]) {
-        NSString *text = DYYYCollectViewText(view, 0);
-
-        if (DYYYIsCustomUpdateText(text) && DYYYLooksLikeCardView(view)) {
-            card = view;
-            break;
-        }
-
-        view = view.superview;
-    }
-
-    if (!card) {
-        // 如果传进来的就是整层蒙版，直接判断它本身
-        NSString *text = DYYYCollectViewText(fromView, 0);
-        if (DYYYIsCustomUpdateText(text) && DYYYLooksLikeFullOverlay(fromView)) {
-            return fromView;
-        }
-
-        return nil;
-    }
+static UIView *DYYYBestPopupRemoveTarget(UIView *card) {
+    if (!card) return nil;
 
     UIView *target = card;
     UIView *parent = card.superview;
     NSInteger upCount = 0;
 
-    // 如果卡片外面包着全屏灰黑蒙版，把蒙版一起删掉，避免只删白框后页面还被遮住
     while (parent && ![parent isKindOfClass:[UIWindow class]] && upCount < 4) {
-        if (DYYYLooksLikeFullOverlay(parent) && parent.subviews.count <= 8) {
+        if (DYYYLooksLikeOverlay(parent) && parent.subviews.count <= 10) {
             target = parent;
         }
 
@@ -462,27 +344,103 @@ static UIView *DYYYFindUpdatePopupTarget(UIView *fromView) {
     return target;
 }
 
-static inline void DYYYTryRemoveCustomUpdatePopup(UIView *view) {
-    if (!DYYYGetBool(@"DYYYNoUpdates")) return;
-    if (!view || !view.window) return;
+static UIView *DYYYFindCustomUpdatePopupTarget(UIView *view, NSInteger depth) {
+    if (!view || depth > 8) return nil;
+    if (view.hidden || view.alpha <= 0.01) return nil;
 
     @try {
-        UIView *target = DYYYFindUpdatePopupTarget(view);
-
-        if (target && ![target isKindOfClass:[UIWindow class]]) {
-            NSString *text = DYYYCollectViewText(target, 0);
-            NSLog(@"[DYYY UpdateBlock] remove custom update view: %@ text: %@",
-                  NSStringFromClass([target class]),
-                  text);
-            DYYYRecordUpdateBlock([NSString stringWithFormat:@"自定义 UIView 弹窗：%@", NSStringFromClass([target class])], text);
-
-            target.hidden = YES;
-            target.alpha = 0.0;
-            [target removeFromSuperview];
+        if (![view isKindOfClass:[UIWindow class]] && DYYYLooksLikePopupCard(view)) {
+            NSString *text = DYYYCollectVisibleViewText(view, 0);
+            if (DYYYIsCustomUpdateText(text)) {
+                return DYYYBestPopupRemoveTarget(view);
+            }
         }
-    } @catch (NSException *e) {
-        NSLog(@"[DYYY UpdateBlock] custom view block exception: %@", e);
+
+        NSArray<UIView *> *subviews = [view.subviews copy];
+        for (UIView *subview in subviews) {
+            UIView *target = DYYYFindCustomUpdatePopupTarget(subview, depth + 1);
+            if (target) return target;
+        }
+    } @catch (NSException *e) {}
+
+    return nil;
+}
+
+static BOOL DYYYScanAndRemoveCustomUpdatePopup(NSString *source) {
+    if (!DYYYGetBool(@"DYYYNoUpdates")) return NO;
+
+    __block BOOL removed = NO;
+
+    void (^scanBlock)(void) = ^{
+        @try {
+            for (UIWindow *window in DYYYAllWindows()) {
+                if (!window || window.hidden || window.alpha <= 0.01) continue;
+
+                UIView *target = DYYYFindCustomUpdatePopupTarget(window, 0);
+                if (!target || [target isKindOfClass:[UIWindow class]]) continue;
+
+                NSString *text = DYYYCollectVisibleViewText(target, 0);
+                DYYYRecordUpdateBlock(source ?: @"自定义 UIView 更新弹窗", text);
+                NSLog(@"[DYYY UpdateBlock] remove custom update view: %@ text: %@", NSStringFromClass([target class]), text);
+
+                target.hidden = YES;
+                target.alpha = 0.0;
+                [target removeFromSuperview];
+                removed = YES;
+                break;
+            }
+        } @catch (NSException *e) {
+            NSLog(@"[DYYY UpdateBlock] safe scan exception: %@", e);
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        scanBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), scanBlock);
     }
+
+    return removed;
+}
+
+static void DYYYShowUpdateBlockDebugPanel(BOOL removedThisTime) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            UIViewController *vc = DYYYTopViewController();
+            if (!vc || [vc isKindOfClass:[UIAlertController class]]) return;
+
+            NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+            NSInteger count = [defaults integerForKey:DYYYUpdateBlockCountKey];
+            NSString *time = [defaults stringForKey:DYYYUpdateBlockLastTimeKey] ?: @"暂无";
+            NSString *source = [defaults stringForKey:DYYYUpdateBlockLastSourceKey] ?: @"暂无";
+            NSString *lastText = [defaults stringForKey:DYYYUpdateBlockLastTextKey] ?: @"暂无";
+            NSString *scanStatus = removedThisTime ? @"本次摇一摇扫描：发现并移除了疑似更新弹窗" : @"本次摇一摇扫描：未发现正在显示的更新弹窗";
+
+            NSString *message = [NSString stringWithFormat:
+                @"%@\n\n拦截次数：%ld\n最近时间：%@\n最近来源：%@\n\n最近文案：\n%@",
+                scanStatus,
+                (long)count,
+                time,
+                source,
+                lastText
+            ];
+
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"DYYY 更新拦截状态"
+                                                                           message:message
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+
+            [alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleCancel handler:nil]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"清空记录" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+                NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+                [defaults removeObjectForKey:DYYYUpdateBlockCountKey];
+                [defaults removeObjectForKey:DYYYUpdateBlockLastTimeKey];
+                [defaults removeObjectForKey:DYYYUpdateBlockLastSourceKey];
+                [defaults removeObjectForKey:DYYYUpdateBlockLastTextKey];
+            }]];
+
+            [vc presentViewController:alert animated:YES completion:nil];
+        } @catch (NSException *e) {}
+    });
 }
 
 static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
@@ -518,7 +476,7 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 @interface AWEMusicExtraModel : NSObject @end
 
 // 修复 contentFilter 编译报错
-@interface AWEAwemeModel : NSObject
+@interface AWEAwemeModel : NSObject 
 - (BOOL)contentFilter;
 @end
 
@@ -890,7 +848,6 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 - (id)workflow {
     if (DYYYGetBool(@"DYYYNoUpdates")) {
         NSLog(@"[DYYY UpdateBlock] block workflow");
-        DYYYRecordUpdateBlock(@"AWEVersionUpdateManager workflow", @"已阻止版本更新 workflow");
         return nil;
     }
 
@@ -900,7 +857,6 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 - (id)badgeModule {
     if (DYYYGetBool(@"DYYYNoUpdates")) {
         NSLog(@"[DYYY UpdateBlock] block badgeModule");
-        DYYYRecordUpdateBlock(@"AWEVersionUpdateManager badgeModule", @"已阻止版本更新 badgeModule");
         return nil;
     }
 
@@ -910,7 +866,7 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 %end
 
 // ==========================================
-// 更新弹窗兜底 1：拦截 UIAlertController 类型的版本更新弹窗
+// 更新弹窗兜底：拦截 UIAlertController 类型的版本更新弹窗
 // ==========================================
 %hook UIViewController
 
@@ -962,37 +918,6 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 %end
 
 // ==========================================
-// 更新弹窗兜底 2：拦截抖音自定义 UIView 更新弹窗
-// 适配“抖音有新版本啦 / 立即升级 / 以后再说”
-// ==========================================
-%hook UIView
-
-- (void)didMoveToWindow {
-    %orig;
-
-    if (!self.window) return;
-
-    DYYYTryRemoveCustomUpdatePopup(self);
-
-    UIView *view = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        DYYYTryRemoveCustomUpdatePopup(view);
-    });
-}
-
-- (void)addSubview:(UIView *)view {
-    %orig(view);
-
-    DYYYTryRemoveCustomUpdatePopup(view);
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        DYYYTryRemoveCustomUpdatePopup(view);
-    });
-}
-
-%end
-
-// ==========================================
 // 更新跳转兜底：防止点“立即升级”后跳 App Store
 // ==========================================
 %hook UIApplication
@@ -1027,10 +952,10 @@ completionHandler:(void (^)(BOOL success))completion {
 
 %end
 
-
 // ==========================================
 // 调试入口：摇一摇查看更新拦截记录
-// 平时完全静默，不弹 Toast；需要确认时摇一摇手机即可。
+// 说明：这一版不再 hook 全局 UIView，避免开屏卡死/闪退。
+// 如果更新弹窗刚好出现，可以摇一摇，代码会先扫描并尝试移除，再显示记录。
 // ==========================================
 %hook UIResponder
 
@@ -1045,7 +970,23 @@ completionHandler:(void (^)(BOOL success))completion {
     if (now - lastShowTime < 1.5) return;
     lastShowTime = now;
 
-    DYYYShowUpdateBlockDebugPanel();
+    BOOL removed = DYYYScanAndRemoveCustomUpdatePopup(@"摇一摇手动扫描");
+    DYYYShowUpdateBlockDebugPanel(removed);
 }
 
 %end
+
+// ==========================================
+// 启动后少量延迟扫描：只扫几次，不再监听每个 UIView，降低卡死/闪退风险
+// ==========================================
+%ctor {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSArray<NSNumber *> *delays = @[@2.0, @5.0, @10.0, @18.0];
+
+        for (NSNumber *delayNumber in delays) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayNumber.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                DYYYScanAndRemoveCustomUpdatePopup(@"启动延迟扫描");
+            });
+        }
+    });
+}
