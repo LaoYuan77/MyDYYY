@@ -53,27 +53,74 @@ static inline void DYYYRecordUpdateBlock(NSString *source, NSString *text) {
     } @catch (NSException *e) {}
 }
 
-static UIViewController *DYYYTopViewController(void) {
+static UIWindow *DYYYFindActiveWindow(void) {
     UIApplication *app = [UIApplication sharedApplication];
-    UIWindow *keyWindow = app.keyWindow;
+    UIWindow *candidateWindow = nil;
 
-    if (!keyWindow) {
-        for (UIWindow *window in app.windows) {
-            if (window.isKeyWindow) {
-                keyWindow = window;
-                break;
+    @try {
+        if (@available(iOS 13.0, *)) {
+            // iOS 13+ 不使用已废弃的 keyWindow / windows，避免 Xcode 16 开启 -Werror 后编译失败
+            NSSet<UIScene *> *scenes = app.connectedScenes;
+
+            for (UIScene *scene in scenes) {
+                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+
+                if (scene.activationState != UISceneActivationStateForegroundActive &&
+                    scene.activationState != UISceneActivationStateForegroundInactive) {
+                    continue;
+                }
+
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                for (UIWindow *window in windowScene.windows) {
+                    if (window.isKeyWindow) {
+                        return window;
+                    }
+
+                    if (!candidateWindow && !window.hidden && window.alpha > 0.01 && window.rootViewController) {
+                        candidateWindow = window;
+                    }
+                }
+            }
+
+            if (candidateWindow) return candidateWindow;
+
+            // 兜底：有些注入场景 activationState 不稳定，再扫一遍所有 scene 的 window
+            for (UIScene *scene in scenes) {
+                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                for (UIWindow *window in windowScene.windows) {
+                    if (window.isKeyWindow) {
+                        return window;
+                    }
+
+                    if (!candidateWindow && !window.hidden && window.alpha > 0.01 && window.rootViewController) {
+                        candidateWindow = window;
+                    }
+                }
+            }
+        } else {
+            // iOS 12 及以下兜底：用 KVC 避免直接调用已废弃属性导致 -Werror 编译失败
+            NSArray<UIWindow *> *windows = [app valueForKey:@"windows"];
+
+            for (UIWindow *window in windows) {
+                if (window.isKeyWindow) {
+                    return window;
+                }
+
+                if (!candidateWindow && !window.hidden && window.alpha > 0.01 && window.rootViewController) {
+                    candidateWindow = window;
+                }
             }
         }
-    }
+    } @catch (NSException *e) {}
 
-    if (!keyWindow) {
-        for (UIWindow *window in app.windows) {
-            if (!window.hidden && window.alpha > 0.01) {
-                keyWindow = window;
-                break;
-            }
-        }
-    }
+    return candidateWindow;
+}
+
+static UIViewController *DYYYTopViewController(void) {
+    UIWindow *keyWindow = DYYYFindActiveWindow();
+    if (!keyWindow) return nil;
 
     UIViewController *vc = keyWindow.rootViewController;
 
