@@ -73,6 +73,7 @@ static NSString *const DYYYUpdateBlockCountKey = @"DYYYUpdateBlockCount";
 static NSString *const DYYYUpdateBlockLastTimeKey = @"DYYYUpdateBlockLastTime";
 static NSString *const DYYYUpdateBlockLastSourceKey = @"DYYYUpdateBlockLastSource";
 static NSString *const DYYYUpdateBlockLastTextKey = @"DYYYUpdateBlockLastText";
+static NSString *const DYYYUpdateBlockHistoryKey = @"DYYYUpdateBlockHistory";
 
 static inline NSString *DYYYCurrentTimeString(void) {
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
@@ -104,10 +105,31 @@ static inline void DYYYRecordUpdateBlock(NSString *source, NSString *text) {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSInteger count = [defaults integerForKey:DYYYUpdateBlockCountKey];
 
+        NSString *timeString = DYYYCurrentTimeString();
+        NSString *safeSource = DYYYSafeRecordText(source ?: @"未知来源");
+        NSString *safeText = DYYYSafeRecordText(text ?: @"");
+
         [defaults setInteger:(count + 1) forKey:DYYYUpdateBlockCountKey];
-        [defaults setObject:DYYYCurrentTimeString() forKey:DYYYUpdateBlockLastTimeKey];
-        [defaults setObject:DYYYSafeRecordText(source ?: @"未知来源") forKey:DYYYUpdateBlockLastSourceKey];
-        [defaults setObject:DYYYSafeRecordText(text ?: @"") forKey:DYYYUpdateBlockLastTextKey];
+        [defaults setObject:timeString forKey:DYYYUpdateBlockLastTimeKey];
+        [defaults setObject:safeSource forKey:DYYYUpdateBlockLastSourceKey];
+        [defaults setObject:safeText forKey:DYYYUpdateBlockLastTextKey];
+
+        // 额外保存最近 20 条历史，避免只看“最近一次”不够用。
+        NSArray *oldHistory = [defaults arrayForKey:DYYYUpdateBlockHistoryKey];
+        NSMutableArray *history = oldHistory ? [oldHistory mutableCopy] : [NSMutableArray array];
+        NSDictionary *record = @{
+            @"time": timeString ?: @"",
+            @"source": safeSource ?: @"",
+            @"text": safeText ?: @""
+        };
+
+        [history insertObject:record atIndex:0];
+        while (history.count > 20) {
+            [history removeLastObject];
+        }
+
+        [defaults setObject:history forKey:DYYYUpdateBlockHistoryKey];
+        [defaults synchronize];
     } @catch (NSException *e) {}
 }
 
@@ -416,27 +438,46 @@ static void DYYYShowUpdateBlockDebugPanel(BOOL removedThisTime) {
             NSString *lastText = [defaults stringForKey:DYYYUpdateBlockLastTextKey] ?: @"暂无";
             NSString *scanStatus = removedThisTime ? @"本次摇一摇扫描：发现并移除了疑似更新弹窗" : @"本次摇一摇扫描：未发现正在显示的更新弹窗";
 
+            NSMutableString *historyText = [NSMutableString string];
+            NSArray *history = [defaults arrayForKey:DYYYUpdateBlockHistoryKey];
+            NSInteger maxCount = MIN((NSInteger)history.count, 5);
+
+            for (NSInteger i = 0; i < maxCount; i++) {
+                id item = history[i];
+                if (![item isKindOfClass:[NSDictionary class]]) continue;
+
+                NSDictionary *record = (NSDictionary *)item;
+                NSString *hTime = [record objectForKey:@"time"] ?: @"";
+                NSString *hSource = [record objectForKey:@"source"] ?: @"";
+                NSString *hText = [record objectForKey:@"text"] ?: @"";
+
+                if (hText.length > 120) {
+                    hText = [[hText substringToIndex:120] stringByAppendingString:@"..."];
+                }
+
+                [historyText appendFormat:@"\n%ld. %@\n%@\n%@\n", (long)(i + 1), hTime, hSource, hText];
+            }
+
+            if (historyText.length == 0) {
+                [historyText appendString:@"\n暂无历史记录"];
+            }
+
             NSString *message = [NSString stringWithFormat:
-                @"%@\n\n拦截次数：%ld\n最近时间：%@\n最近来源：%@\n\n最近文案：\n%@",
+                @"%@\n\n拦截次数：%ld\n最近时间：%@\n最近来源：%@\n\n最近文案：\n%@\n\n最近 5 条历史：%@",
                 scanStatus,
                 (long)count,
                 time,
                 source,
-                lastText
+                lastText,
+                historyText
             ];
 
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"DYYY 更新拦截状态"
                                                                            message:message
                                                                     preferredStyle:UIAlertControllerStyleAlert];
 
+            // 只保留关闭按钮，避免误点清空记录。
             [alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleCancel handler:nil]];
-            [alert addAction:[UIAlertAction actionWithTitle:@"清空记录" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-                NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-                [defaults removeObjectForKey:DYYYUpdateBlockCountKey];
-                [defaults removeObjectForKey:DYYYUpdateBlockLastTimeKey];
-                [defaults removeObjectForKey:DYYYUpdateBlockLastSourceKey];
-                [defaults removeObjectForKey:DYYYUpdateBlockLastTextKey];
-            }]];
 
             [vc presentViewController:alert animated:YES completion:nil];
         } @catch (NSException *e) {}
@@ -977,16 +1018,27 @@ completionHandler:(void (^)(BOOL success))completion {
 %end
 
 // ==========================================
-// 启动后少量延迟扫描：只扫几次，不再监听每个 UIView，降低卡死/闪退风险
+// 启动 / 回到前台后延迟扫描：不 hook 全局 UIView，避免开屏卡死/闪退
 // ==========================================
-%ctor {
+static void DYYYScheduleUpdateBlockScans(NSString *source) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSArray<NSNumber *> *delays = @[@2.0, @5.0, @10.0, @18.0];
+        NSArray<NSNumber *> *delays = @[@0.3, @0.8, @1.5, @2.5, @4.0, @6.0, @9.0, @13.0, @18.0, @25.0];
 
         for (NSNumber *delayNumber in delays) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayNumber.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                DYYYScanAndRemoveCustomUpdatePopup(@"启动延迟扫描");
+                DYYYScanAndRemoveCustomUpdatePopup(source ?: @"延迟扫描");
             });
         }
     });
+}
+
+%ctor {
+    DYYYScheduleUpdateBlockScans(@"启动延迟扫描");
+
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+        DYYYScheduleUpdateBlockScans(@"进入前台延迟扫描");
+    }];
 }
