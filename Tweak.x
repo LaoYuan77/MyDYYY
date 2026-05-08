@@ -1,10 +1,46 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h> 
 
-// ========== 工具函数：强制所有开关默认生效 ==========
+// ========== 设置开关：NSUserDefaults 持久化，首次默认全部开启 ==========
+static NSString *const DYYYSettingDefaultEnabledKey = @"__DYYYDefaultEnabled";
+
+static inline NSArray<NSDictionary *> *DYYYSettingItems(void) {
+    return @[
+        @{@"key": @"DYYYHideFeedTabJumpGuide", @"title": @"隐藏双列箭头", @"desc": @"隐藏首页双列/跳转引导箭头"},
+        @{@"key": @"DYYYHideTopTabLine", @"title": @"隐藏顶栏横线", @"desc": @"隐藏顶栏选中横线/容器"},
+        @{@"key": @"DYYYDisablePullRefresh", @"title": @"禁用下拉刷新", @"desc": @"阻止首页下拉刷新视频"},
+        @{@"key": @"DYYYDisableLivePCDN", @"title": @"禁用直播 PCDN", @"desc": @"阻止直播 PCDN 相关启动任务"},
+        @{@"key": @"DYYYChangeHomeTabText", @"title": @"首页改成 𝑳𝒐𝒗𝒆", @"desc": @"把底栏首页文字替换为 𝑳𝒐𝒗𝒆"},
+        @{@"key": @"DYYYDisableHomeRefresh", @"title": @"禁用点击首页刷新", @"desc": @"再次点击首页时不刷新推荐流"},
+        @{@"key": @"DYYYHideCommentViews", @"title": @"隐藏搜索词模型", @"desc": @"隐藏相关搜索/观看历史搜索词"},
+        @{@"key": @"DYYYHideInteractionSearch", @"title": @"隐藏视频页搜索锚点", @"desc": @"隐藏播放页相关搜索入口"},
+        @{@"key": @"DYYYHideHotSearch", @"title": @"隐藏弹出热搜框", @"desc": @"隐藏底部弹出的热搜/搜索框"},
+        @{@"key": @"DYYYHideHotspot", @"title": @"隐藏热点提示", @"desc": @"隐藏热点列表/热点提示文案"},
+        @{@"key": @"DYYYHideMessageTabRedPacket", @"title": @"隐藏消息页红包", @"desc": @"隐藏消息顶栏红包入口"},
+        @{@"key": @"DYYYHideQishuiMusicAnchor", @"title": @"隐藏汽水音乐入口", @"desc": @"隐藏去汽水听按钮/音乐锚点"},
+        @{@"key": @"DYYYSkipQishuiMusicVideo", @"title": @"跳过汽水音乐视频", @"desc": @"刷到带汽水音乐锚点的视频时直接过滤"},
+        @{@"key": @"DYYYNoUpdates", @"title": @"拦截版本更新", @"desc": @"屏蔽抖音更新弹窗和 App Store 跳转"}
+    ];
+}
+
 static inline BOOL DYYYGetBool(NSString *key) {
-    // 既然没有 UI 设置面板，直接让所有开关判断永远返回 YES
-    return YES;
+    if (!key || key.length == 0) return NO;
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    id value = [defaults objectForKey:key];
+
+    // 兼容你之前“全部默认生效”的逻辑：没有保存过设置时默认开启。
+    if (value == nil) return YES;
+
+    return [defaults boolForKey:key];
+}
+
+static inline void DYYYSetBool(NSString *key, BOOL enabled) {
+    if (!key || key.length == 0) return;
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setBool:enabled forKey:key];
+    [defaults synchronize];
 }
 
 // ========== 更新弹窗文本判断 ==========
@@ -23,8 +59,10 @@ static inline BOOL DYYYTextContainsAny(NSString *text, NSArray<NSString *> *keyw
 static inline BOOL DYYYIsUpdateAlertText(NSString *text) {
     if (!text || text.length == 0) return NO;
 
-    // 避免把摇一摇调试框误判成更新弹窗
+    // 避免把本插件设置/记录文本误判成更新弹窗
     if ([text containsString:@"DYYY 更新拦截状态"] ||
+        [text containsString:@"DYYY 设置"] ||
+        [text containsString:@"更新拦截记录"] ||
         [text containsString:@"拦截次数"] ||
         [text containsString:@"最近文案"]) {
         return NO;
@@ -68,7 +106,7 @@ static inline BOOL DYYYIsUpdateAlertText(NSString *text) {
 }
 
 
-// ========== 更新拦截记录：静默记录 + 摇一摇查看 ==========
+// ========== 更新拦截记录：静默保存，设置页查看 ==========
 static NSString *const DYYYUpdateBlockCountKey = @"DYYYUpdateBlockCount";
 static NSString *const DYYYUpdateBlockLastTimeKey = @"DYYYUpdateBlockLastTime";
 static NSString *const DYYYUpdateBlockLastSourceKey = @"DYYYUpdateBlockLastSource";
@@ -425,65 +463,6 @@ static BOOL DYYYScanAndRemoveCustomUpdatePopup(NSString *source) {
     return removed;
 }
 
-static void DYYYShowUpdateBlockDebugPanel(BOOL removedThisTime) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        @try {
-            UIViewController *vc = DYYYTopViewController();
-            if (!vc || [vc isKindOfClass:[UIAlertController class]]) return;
-
-            NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-            NSInteger count = [defaults integerForKey:DYYYUpdateBlockCountKey];
-            NSString *time = [defaults stringForKey:DYYYUpdateBlockLastTimeKey] ?: @"暂无";
-            NSString *source = [defaults stringForKey:DYYYUpdateBlockLastSourceKey] ?: @"暂无";
-            NSString *lastText = [defaults stringForKey:DYYYUpdateBlockLastTextKey] ?: @"暂无";
-            NSString *scanStatus = removedThisTime ? @"本次摇一摇扫描：发现并移除了疑似更新弹窗" : @"本次摇一摇扫描：未发现正在显示的更新弹窗";
-
-            NSMutableString *historyText = [NSMutableString string];
-            NSArray *history = [defaults arrayForKey:DYYYUpdateBlockHistoryKey];
-            NSInteger maxCount = MIN((NSInteger)history.count, 5);
-
-            for (NSInteger i = 0; i < maxCount; i++) {
-                id item = history[i];
-                if (![item isKindOfClass:[NSDictionary class]]) continue;
-
-                NSDictionary *record = (NSDictionary *)item;
-                NSString *hTime = [record objectForKey:@"time"] ?: @"";
-                NSString *hSource = [record objectForKey:@"source"] ?: @"";
-                NSString *hText = [record objectForKey:@"text"] ?: @"";
-
-                if (hText.length > 120) {
-                    hText = [[hText substringToIndex:120] stringByAppendingString:@"..."];
-                }
-
-                [historyText appendFormat:@"\n%ld. %@\n%@\n%@\n", (long)(i + 1), hTime, hSource, hText];
-            }
-
-            if (historyText.length == 0) {
-                [historyText appendString:@"\n暂无历史记录"];
-            }
-
-            NSString *message = [NSString stringWithFormat:
-                @"%@\n\n拦截次数：%ld\n最近时间：%@\n最近来源：%@\n\n最近文案：\n%@\n\n最近 5 条历史：%@",
-                scanStatus,
-                (long)count,
-                time,
-                source,
-                lastText,
-                historyText
-            ];
-
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"DYYY 更新拦截状态"
-                                                                           message:message
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-
-            // 只保留关闭按钮，避免误点清空记录。
-            [alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleCancel handler:nil]];
-
-            [vc presentViewController:alert animated:YES completion:nil];
-        } @catch (NSException *e) {}
-    });
-}
-
 static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
     if (!url) return NO;
 
@@ -497,6 +476,311 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
     if ([absolute containsString:@"appstore"]) return YES;
 
     return NO;
+}
+
+// ========== 设置 UI：双指长按打开，更新拦截记录在这里查看 ==========
+static inline void DYYYClearUpdateBlockHistory(void) {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults removeObjectForKey:DYYYUpdateBlockCountKey];
+    [defaults removeObjectForKey:DYYYUpdateBlockLastTimeKey];
+    [defaults removeObjectForKey:DYYYUpdateBlockLastSourceKey];
+    [defaults removeObjectForKey:DYYYUpdateBlockLastTextKey];
+    [defaults removeObjectForKey:DYYYUpdateBlockHistoryKey];
+    [defaults synchronize];
+}
+
+static inline NSString *DYYYUpdateBlockSummaryText(void) {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSInteger count = [defaults integerForKey:DYYYUpdateBlockCountKey];
+    NSString *time = [defaults stringForKey:DYYYUpdateBlockLastTimeKey] ?: @"暂无";
+    NSString *source = [defaults stringForKey:DYYYUpdateBlockLastSourceKey] ?: @"暂无";
+    NSString *lastText = [defaults stringForKey:DYYYUpdateBlockLastTextKey] ?: @"暂无";
+
+    if (lastText.length > 260) {
+        lastText = [[lastText substringToIndex:260] stringByAppendingString:@"..."];
+    }
+
+    return [NSString stringWithFormat:@"拦截次数：%ld\n最近时间：%@\n最近来源：%@\n最近文案：%@",
+            (long)count, time, source, lastText];
+}
+
+@interface DYYYSettingsViewController : UITableViewController
+@property (nonatomic, strong) NSArray<NSDictionary *> *items;
+@end
+
+static inline UIColor *DYYYPrimaryTextColor(void) {
+    if (@available(iOS 13.0, *)) {
+        return UIColor.labelColor;
+    }
+
+    return UIColor.blackColor;
+}
+
+static inline UIColor *DYYYSecondaryTextColor(void) {
+    if (@available(iOS 13.0, *)) {
+        return UIColor.secondaryLabelColor;
+    }
+
+    return UIColor.darkGrayColor;
+}
+
+@implementation DYYYSettingsViewController
+
+- (instancetype)init {
+    UITableViewStyle style = UITableViewStyleGrouped;
+    if (@available(iOS 13.0, *)) {
+        style = UITableViewStyleInsetGrouped;
+    }
+
+    self = [super initWithStyle:style];
+    if (self) {
+        self.items = DYYYSettingItems();
+        self.title = @"DYYY 设置";
+    }
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 64.0;
+
+    UIBarButtonItem *closeItem = [[UIBarButtonItem alloc] initWithTitle:@"完成"
+                                                                  style:UIBarButtonItemStyleDone
+                                                                 target:self
+                                                                 action:@selector(dyyy_close)];
+    self.navigationItem.rightBarButtonItem = closeItem;
+}
+
+- (void)dyyy_close {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return 2;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (section == 0) return self.items.count;
+
+    NSArray *history = [[NSUserDefaults standardUserDefaults] arrayForKey:DYYYUpdateBlockHistoryKey];
+    NSInteger historyCount = MIN((NSInteger)history.count, 20);
+
+    // 0 = 摘要，1 = 手动扫描，2 = 清空记录，3... = 历史
+    return 3 + historyCount;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    return section == 0 ? @"功能开关" : @"更新拦截记录";
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 0) {
+        return @"所有开关默认开启。关闭某项后立即保存，部分界面类功能可能需要重新进入页面或重启抖音才完全恢复。";
+    }
+
+    return @"这里显示的是静默拦截历史，不再使用摇一摇弹窗，避免记录窗口一闪而过。";
+}
+
+- (UITableViewCell *)dyyy_switchCellForTableView:(UITableView *)tableView indexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"DYYYSwitchCell"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"DYYYSwitchCell"];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.textLabel.numberOfLines = 1;
+        cell.detailTextLabel.numberOfLines = 2;
+    }
+
+    NSDictionary *item = self.items[indexPath.row];
+    NSString *key = item[@"key"] ?: @"";
+
+    cell.textLabel.text = item[@"title"] ?: key;
+    cell.detailTextLabel.text = item[@"desc"] ?: @"";
+
+    UISwitch *toggle = [[UISwitch alloc] init];
+    toggle.on = DYYYGetBool(key);
+    objc_setAssociatedObject(toggle, @selector(dyyy_switchChanged:), key, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [toggle addTarget:self action:@selector(dyyy_switchChanged:) forControlEvents:UIControlEventValueChanged];
+    cell.accessoryView = toggle;
+
+    return cell;
+}
+
+- (UITableViewCell *)dyyy_recordCellForTableView:(UITableView *)tableView indexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"DYYYRecordCell"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"DYYYRecordCell"];
+        cell.textLabel.numberOfLines = 0;
+        cell.detailTextLabel.numberOfLines = 0;
+    }
+
+    cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    cell.textLabel.textColor = DYYYPrimaryTextColor();
+    cell.detailTextLabel.textColor = DYYYSecondaryTextColor();
+
+    if (indexPath.row == 0) {
+        cell.textLabel.text = @"最近状态";
+        cell.detailTextLabel.text = DYYYUpdateBlockSummaryText();
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        return cell;
+    }
+
+    if (indexPath.row == 1) {
+        cell.textLabel.text = @"手动扫描当前更新弹窗";
+        cell.detailTextLabel.text = @"如果弹窗正在屏幕上，点这里会扫描并尝试移除，同时写入历史记录。";
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        return cell;
+    }
+
+    if (indexPath.row == 2) {
+        cell.textLabel.text = @"清空拦截记录";
+        cell.detailTextLabel.text = @"只清空本页历史，不影响功能开关。";
+        cell.textLabel.textColor = UIColor.systemRedColor;
+        return cell;
+    }
+
+    NSArray *history = [[NSUserDefaults standardUserDefaults] arrayForKey:DYYYUpdateBlockHistoryKey];
+    NSInteger historyIndex = indexPath.row - 3;
+
+    if (historyIndex >= 0 && historyIndex < (NSInteger)history.count) {
+        id obj = history[historyIndex];
+        if ([obj isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *record = (NSDictionary *)obj;
+            NSString *time = record[@"time"] ?: @"";
+            NSString *source = record[@"source"] ?: @"";
+            NSString *text = record[@"text"] ?: @"";
+
+            cell.textLabel.text = [NSString stringWithFormat:@"%ld. %@", (long)(historyIndex + 1), time.length ? time : @"无时间"];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@\n%@", source.length ? source : @"未知来源", text.length ? text : @"无文案"];
+        }
+    }
+
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    return cell;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 0) {
+        return [self dyyy_switchCellForTableView:tableView indexPath:indexPath];
+    }
+
+    return [self dyyy_recordCellForTableView:tableView indexPath:indexPath];
+}
+
+- (void)dyyy_switchChanged:(UISwitch *)sender {
+    NSString *key = objc_getAssociatedObject(sender, @selector(dyyy_switchChanged:));
+    if (key.length == 0) return;
+
+    DYYYSetBool(key, sender.isOn);
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+
+    if (indexPath.section != 1) return;
+
+    if (indexPath.row == 1) {
+        BOOL removed = DYYYScanAndRemoveCustomUpdatePopup(@"设置页手动扫描");
+        NSString *message = removed ? @"发现并移除了疑似更新弹窗，已写入记录。" : @"当前没有发现正在显示的更新弹窗。";
+
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"扫描完成"
+                                                                       message:message
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationAutomatic];
+        return;
+    }
+
+    if (indexPath.row == 2) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"清空拦截记录？"
+                                                                       message:@"这只会清空历史记录，不会关闭更新拦截。"
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+            DYYYClearUpdateBlockHistory();
+            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationAutomatic];
+        }]];
+        [self presentViewController:alert animated:YES completion:nil];
+    }
+}
+
+@end
+
+static void DYYYShowSettingsPanel(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            UIViewController *vc = DYYYTopViewController();
+            if (!vc) return;
+
+            NSString *className = NSStringFromClass([vc class]);
+            if ([className containsString:@"DYYYSettingsViewController"]) return;
+            if ([vc isKindOfClass:[UIAlertController class]]) return;
+
+            DYYYSettingsViewController *settingsVC = [[DYYYSettingsViewController alloc] init];
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:settingsVC];
+            nav.modalPresentationStyle = UIModalPresentationFullScreen;
+
+            [vc presentViewController:nav animated:YES completion:nil];
+        } @catch (NSException *e) {
+            NSLog(@"[DYYY Settings] present exception: %@", e);
+        }
+    });
+}
+
+@interface DYYYGestureHandler : NSObject
++ (instancetype)sharedHandler;
+- (void)handleTwoFingerLongPress:(UILongPressGestureRecognizer *)gesture;
+@end
+
+@implementation DYYYGestureHandler
+
++ (instancetype)sharedHandler {
+    static DYYYGestureHandler *handler = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        handler = [[DYYYGestureHandler alloc] init];
+    });
+    return handler;
+}
+
+- (void)handleTwoFingerLongPress:(UILongPressGestureRecognizer *)gesture {
+    if (gesture.state != UIGestureRecognizerStateBegan) return;
+
+    static NSTimeInterval lastShowTime = 0;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - lastShowTime < 1.5) return;
+    lastShowTime = now;
+
+    DYYYShowSettingsPanel();
+}
+
+@end
+
+static void DYYYAttachSettingsGestureToView(UIView *view) {
+    if (!view) return;
+
+    @try {
+        static const void *DYYYSettingsGestureInstalledKey = &DYYYSettingsGestureInstalledKey;
+        NSNumber *installed = objc_getAssociatedObject(view, DYYYSettingsGestureInstalledKey);
+        if (installed.boolValue) return;
+
+        UILongPressGestureRecognizer *gesture = [[UILongPressGestureRecognizer alloc] initWithTarget:[DYYYGestureHandler sharedHandler]
+                                                                                              action:@selector(handleTwoFingerLongPress:)];
+        gesture.numberOfTouchesRequired = 2;
+        gesture.minimumPressDuration = 0.75;
+        gesture.cancelsTouchesInView = NO;
+        gesture.delaysTouchesBegan = NO;
+        gesture.delaysTouchesEnded = NO;
+
+        [view addGestureRecognizer:gesture];
+        objc_setAssociatedObject(view, DYYYSettingsGestureInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } @catch (NSException *e) {
+        NSLog(@"[DYYY Settings] attach gesture exception: %@", e);
+    }
 }
 
 // ========== 身份声明，防止编译报错 ==========
@@ -528,17 +812,30 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 
 - (void)layoutSubviews {
     %orig;
-    self.alpha = 0.0;
-    self.hidden = YES;
-    [self removeFromSuperview];
+
+    if (DYYYGetBool(@"DYYYHideFeedTabJumpGuide")) {
+        self.alpha = 0.0;
+        self.hidden = YES;
+        [self removeFromSuperview];
+    }
 }
 
 - (void)setHidden:(BOOL)hidden {
-    %orig(YES);
+    if (DYYYGetBool(@"DYYYHideFeedTabJumpGuide")) {
+        %orig(YES);
+        return;
+    }
+
+    %orig(hidden);
 }
 
 - (void)setAlpha:(CGFloat)alpha {
-    %orig(0.0);
+    if (DYYYGetBool(@"DYYYHideFeedTabJumpGuide")) {
+        %orig(0.0);
+        return;
+    }
+
+    %orig(alpha);
 }
 
 %end
@@ -550,16 +847,29 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 
 - (void)layoutSubviews {
     %orig;
-    self.alpha = 0.0;
-    self.hidden = YES;
+
+    if (DYYYGetBool(@"DYYYHideTopTabLine")) {
+        self.alpha = 0.0;
+        self.hidden = YES;
+    }
 }
 
 - (void)setHidden:(BOOL)hidden {
-    %orig(YES);
+    if (DYYYGetBool(@"DYYYHideTopTabLine")) {
+        %orig(YES);
+        return;
+    }
+
+    %orig(hidden);
 }
 
 - (void)setAlpha:(CGFloat)alpha {
-    %orig(0.0);
+    if (DYYYGetBool(@"DYYYHideTopTabLine")) {
+        %orig(0.0);
+        return;
+    }
+
+    %orig(alpha);
 }
 
 %end
@@ -570,23 +880,32 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 %hook AWEFeedTableViewController
 
 - (BOOL)canRefresh {
-    return NO;
+    if (DYYYGetBool(@"DYYYDisablePullRefresh")) return NO;
+    return %orig;
 }
 
 - (void)setCanRefresh:(BOOL)arg {
-    %orig(NO);
+    if (DYYYGetBool(@"DYYYDisablePullRefresh")) {
+        %orig(NO);
+        return;
+    }
+
+    %orig(arg);
 }
 
 - (void)refreshData {
-    return;
+    if (DYYYGetBool(@"DYYYDisablePullRefresh")) return;
+    %orig;
 }
 
 - (void)handlePullToRefresh {
-    return;
+    if (DYYYGetBool(@"DYYYDisablePullRefresh")) return;
+    %orig;
 }
 
 - (void)pulldownToRefresh {
-    return;
+    if (DYYYGetBool(@"DYYYDisablePullRefresh")) return;
+    %orig;
 }
 
 %end
@@ -594,11 +913,17 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 %hook AWEFeedContainerViewController
 
 - (BOOL)canRefresh {
-    return NO;
+    if (DYYYGetBool(@"DYYYDisablePullRefresh")) return NO;
+    return %orig;
 }
 
 - (void)setCanRefresh:(BOOL)arg {
-    %orig(NO);
+    if (DYYYGetBool(@"DYYYDisablePullRefresh")) {
+        %orig(NO);
+        return;
+    }
+
+    %orig(arg);
 }
 
 %end
@@ -609,11 +934,13 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 %hook HTSLiveStreamPcdnManager
 
 + (void)start {
-    return;
+    if (DYYYGetBool(@"DYYYDisableLivePCDN")) return;
+    %orig;
 }
 
 + (void)configAndStartLiveIO {
-    return;
+    if (DYYYGetBool(@"DYYYDisableLivePCDN")) return;
+    %orig;
 }
 
 %end
@@ -621,7 +948,8 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 %hook IESLiveLaunchTaskPcdn
 
 - (void)excute {
-    return;
+    if (DYYYGetBool(@"DYYYDisableLivePCDN")) return;
+    %orig;
 }
 
 %end
@@ -633,6 +961,8 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 
 - (void)layoutSubviews {
     %orig;
+
+    if (!DYYYGetBool(@"DYYYChangeHomeTabText")) return;
 
     @try {
         for (UIView *subview in self.subviews) {
@@ -655,29 +985,33 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 %hook AWENormalModeTabBarGeneralButton
 
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    @try {
-        NSString *label = self.accessibilityLabel ?: @"";
+    if (DYYYGetBool(@"DYYYDisableHomeRefresh")) {
+        @try {
+            NSString *label = self.accessibilityLabel ?: @"";
 
-        if ([label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"]) {
-            NSNumber *statusObj = [self valueForKey:@"status"];
+            if ([label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"]) {
+                NSNumber *statusObj = [self valueForKey:@"status"];
 
-            if (statusObj && [statusObj integerValue] == 2) {
-                return NO;
+                if (statusObj && [statusObj integerValue] == 2) {
+                    return NO;
+                }
             }
-        }
-    } @catch (NSException *e) {}
+        } @catch (NSException *e) {}
+    }
 
     return %orig(point, event);
 }
 
 - (BOOL)enableRefresh {
-    @try {
-        NSString *label = self.accessibilityLabel ?: @"";
+    if (DYYYGetBool(@"DYYYDisableHomeRefresh")) {
+        @try {
+            NSString *label = self.accessibilityLabel ?: @"";
 
-        if ([label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"]) {
-            return NO;
-        }
-    } @catch (NSException *e) {}
+            if ([label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"]) {
+                return NO;
+            }
+        } @catch (NSException *e) {}
+    }
 
     return %orig;
 }
@@ -690,7 +1024,8 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 %hook AWESearchAnchorListModel
 
 - (BOOL)hideWords {
-    return DYYYGetBool(@"DYYYHideCommentViews");
+    if (DYYYGetBool(@"DYYYHideCommentViews")) return YES;
+    return %orig;
 }
 
 %end
@@ -781,7 +1116,7 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 - (instancetype)initWithDictionary:(id)dict error:(NSError **)error {
     id orig = %orig;
 
-    if (orig && [orig contentFilter]) {
+    if (orig && DYYYGetBool(@"DYYYSkipQishuiMusicVideo") && [orig contentFilter]) {
         return nil;
     }
 
@@ -790,7 +1125,7 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 
 %new
 - (BOOL)contentFilter {
-    BOOL skipMusic = DYYYGetBool(@"DYYYHideQuqishuiting");
+    BOOL skipMusic = DYYYGetBool(@"DYYYSkipQishuiMusicVideo");
 
     id realAnchor = nil;
     Ivar anchorIvar = class_getInstanceVariable([self class], "_relatedMusicAnchor");
@@ -803,7 +1138,7 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 }
 
 - (id)relatedMusicAnchor {
-    if (DYYYGetBool(@"DYYYHideQuqishuiting")) {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) {
         return nil;
     }
 
@@ -811,7 +1146,7 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 }
 
 - (void)setRelatedMusicAnchor:(id)anchor {
-    if (DYYYGetBool(@"DYYYHideQuqishuiting")) {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) {
         %orig(nil);
         return;
     }
@@ -824,7 +1159,7 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 %hook AWERelatedMusicAnchorModel
 
 - (instancetype)init {
-    if (DYYYGetBool(@"DYYYHideQuqishuiting")) {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) {
         return nil;
     }
 
@@ -832,7 +1167,7 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 }
 
 - (instancetype)initWithDictionary:(id)dict error:(NSError **)error {
-    if (DYYYGetBool(@"DYYYHideQuqishuiting")) {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) {
         return nil;
     }
 
@@ -844,7 +1179,7 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 %hook AWEMusicExtraModel
 
 - (id)commentTopBarInfo {
-    if (DYYYGetBool(@"DYYYHideQuqishuiting")) {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) {
         return nil;
     }
 
@@ -852,7 +1187,7 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 }
 
 - (void)setCommentTopBarInfo:(id)info {
-    if (DYYYGetBool(@"DYYYHideQuqishuiting")) {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) {
         %orig(nil);
         return;
     }
@@ -910,6 +1245,18 @@ static inline BOOL DYYYShouldBlockUpdateURL(NSURL *url) {
 // 更新弹窗兜底：拦截 UIAlertController 类型的版本更新弹窗
 // ==========================================
 %hook UIViewController
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig(animated);
+
+    @try {
+        // 不在设置页自身重复安装，避免长按时反复打开。
+        NSString *className = NSStringFromClass([self class]);
+        if ([className containsString:@"DYYYSettingsViewController"]) return;
+
+        DYYYAttachSettingsGestureToView(self.view);
+    } @catch (NSException *e) {}
+}
 
 - (void)presentViewController:(UIViewController *)viewControllerToPresent
                      animated:(BOOL)flag
@@ -994,28 +1341,8 @@ completionHandler:(void (^)(BOOL success))completion {
 %end
 
 // ==========================================
-// 调试入口：摇一摇查看更新拦截记录
-// 说明：这一版不再 hook 全局 UIView，避免开屏卡死/闪退。
-// 如果更新弹窗刚好出现，可以摇一摇，代码会先扫描并尝试移除，再显示记录。
+// 设置入口已改为双指长按；不再使用摇一摇弹出拦截记录
 // ==========================================
-%hook UIResponder
-
-- (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent *)event {
-    %orig;
-
-    if (motion != UIEventSubtypeMotionShake) return;
-    if (!DYYYGetBool(@"DYYYNoUpdates")) return;
-
-    static NSTimeInterval lastShowTime = 0;
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - lastShowTime < 1.5) return;
-    lastShowTime = now;
-
-    BOOL removed = DYYYScanAndRemoveCustomUpdatePopup(@"摇一摇手动扫描");
-    DYYYShowUpdateBlockDebugPanel(removed);
-}
-
-%end
 
 // ==========================================
 // 启动 / 回到前台后延迟扫描：不 hook 全局 UIView，避免开屏卡死/闪退
