@@ -1,10 +1,9 @@
 // DYYY (精简版)
-// 与原版 DYYY 屏蔽弹窗逻辑一致，保留所有功能
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-#pragma mark - 类前向声明（完整 @interface）
+#pragma mark - 类前向声明
 
 @interface AWEFeedTabJumpGuideView : UIView @end
 @interface AWEFeedMultiTabSelectedContainerView : UIView @end
@@ -64,11 +63,18 @@ static inline void DYYYSetBool(NSString *key, BOOL value) {
     [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
-// 辅助函数：调用 completion block（避免 ^ 符号出现在 %hook 内部导致 Logos 解析错误）
-static inline void DYYYInvokeCompletion(id completion) {
+// 用 Block ABI 结构体调用 completion，完全避免 ^ 符号
+typedef struct {
+    void *isa;
+    int   flags;
+    int   reserved;
+    void  (*invoke)(void *);
+} DYYYBlockLayout;
+
+static void DYYYInvokeCompletion(id completion) {
     if (!completion) return;
-    void (^cb)(void) = completion;
-    cb();
+    DYYYBlockLayout *blk = (__bridge DYYYBlockLayout *)completion;
+    blk->invoke(blk);
 }
 
 #pragma mark - 设置项配置
@@ -92,9 +98,7 @@ static NSArray *DYYYSettingItems(void) {
         @"跳过汽水音乐视频", @"屏蔽更新提示",
     ];
     for (NSUInteger i = 0; i < keys.count; i++) {
-        NSDictionary *d = [NSDictionary dictionaryWithObjectsAndKeys:
-                           keys[i], @"key", titles[i], @"title", nil];
-        [arr addObject:d];
+        [arr addObject:@{@"key": keys[i], @"title": titles[i]}];
     }
     items = [arr copy];
     return items;
@@ -111,16 +115,13 @@ static NSArray *DYYYSettingItems(void) {
     [super viewDidLoad];
     self.title = @"DYYY 设置";
     self.tableView.tableFooterView = [UIView new];
-    UIBarButtonItem *closeBtn = [[UIBarButtonItem alloc]
-        initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-                             target:self
-                             action:@selector(closeTapped)];
-    self.navigationItem.rightBarButtonItem = closeBtn;
+    self.navigationItem.rightBarButtonItem =
+        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                                                      target:self
+                                                      action:@selector(closeTapped)];
 }
 
-- (void)closeTapped {
-    [self dismissViewControllerAnimated:YES completion:nil];
-}
+- (void)closeTapped { [self dismissViewControllerAnimated:YES completion:nil]; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return DYYYSettingItems().count;
@@ -130,11 +131,9 @@ static NSArray *DYYYSettingItems(void) {
     static NSString *ID = @"DYYYCell";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:ID];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:ID];
-
     NSDictionary *item = DYYYSettingItems()[indexPath.row];
     cell.textLabel.text = item[@"title"];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
-
     UISwitch *sw = [UISwitch new];
     sw.on = DYYYGetBool(item[@"key"]);
     objc_setAssociatedObject(sw, "DYYYKey", item[@"key"], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -150,7 +149,7 @@ static NSArray *DYYYSettingItems(void) {
 
 @end
 
-#pragma mark - 双指长按手势 + 工具方法
+#pragma mark - 双指长按手势
 
 @interface DYYYGestureHandler : NSObject
 + (instancetype)shared;
@@ -263,7 +262,7 @@ static void DYYYAttachSettingsGestureToView(UIView *view) {
 - (void)run { if (!DYYYGetBool(@"DYYYDisableLivePCDN")) %orig; }
 %end
 
-#pragma mark - 6. 首页标签文字 → 𝑳𝒐𝒗𝒆
+#pragma mark - 6. 首页标签 → 𝑳𝒐𝒗𝒆
 
 %hook AWENormalModeTabBarTextView
 - (void)setText:(NSString *)text {
@@ -281,9 +280,7 @@ static void DYYYAttachSettingsGestureToView(UIView *view) {
         Ivar iv = class_getInstanceVariable([self class], "_status");
         if (iv) {
             id status = object_getIvar(self, iv);
-            if (status && [[status valueForKey:@"isSelected"] boolValue]) {
-                return;
-            }
+            if (status && [[status valueForKey:@"isSelected"] boolValue]) return;
         }
     }
     %orig;
