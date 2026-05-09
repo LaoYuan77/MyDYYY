@@ -4,6 +4,54 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
+#pragma mark - 类前向声明（完整 @interface）
+
+@interface AWEFeedTabJumpGuideView : UIView @end
+@interface AWEFeedMultiTabSelectedContainerView : UIView @end
+@interface AWEFeedTableViewController : UIViewController
+- (BOOL)enablePullDownRefresh;
+@end
+@interface AWEFeedContainerViewController : UIViewController
+- (BOOL)enablePullDownRefresh;
+@end
+@interface HTSLiveStreamPcdnManager : NSObject
+- (void)startPcdn;
+- (BOOL)isPcdnEnabled;
+@end
+@interface IESLiveLaunchTaskPcdn : NSObject
+- (void)run;
+@end
+@interface AWENormalModeTabBarTextView : UIView
+- (void)setText:(NSString *)text;
+@end
+@interface AWENormalModeTabBarGeneralButton : UIControl
+- (void)onClick;
+@end
+@interface AWESearchAnchorListModel : NSObject
+- (BOOL)isHidden;
+@end
+@interface AWEPlayInteractionSearchAnchorView : UIView @end
+@interface AWEHotSearchInnerBottomView : UIView @end
+@interface AWEHotSpotListModel : NSObject
+- (BOOL)isHidden;
+@end
+@interface AWEIMMessageTabSideBarView : UIView @end
+@interface AWERelatedMusicAnchorModel : NSObject
+- (BOOL)isHidden;
+@end
+@interface AWEMusicExtraModel : NSObject
+- (id)anchorInfo;
+@end
+@interface AWEAwemeModel : NSObject
+- (BOOL)isQishuiMusicVideo;
+@end
+@interface AWEVersionUpdateManager : NSObject
+- (void)startVersionUpdateWorkflow:(id)arg1 completion:(id)arg2;
+- (id)workflow;
+- (id)badgeModule;
+@end
+@interface AWENormalModeTabBar : UIView @end
+
 #pragma mark - 设置读写
 
 static inline BOOL DYYYGetBool(NSString *key) {
@@ -203,7 +251,8 @@ static void DYYYAttachSettingsGestureToView(UIView *view) {
         Ivar iv = class_getInstanceVariable([self class], "_status");
         if (iv) {
             id status = object_getIvar(self, iv);
-            if ([status respondsToSelector:@selector(isSelected)] && [status performSelector:@selector(isSelected)]) {
+            if ([status respondsToSelector:@selector(isSelected)] &&
+                [[status valueForKey:@"isSelected"] boolValue]) {
                 return;     // 已选中再点 → 拦截刷新
             }
         }
@@ -273,11 +322,11 @@ static void DYYYAttachSettingsGestureToView(UIView *view) {
         dispatch_async(dispatch_get_main_queue(), ^{
             UIWindow *win = UIApplication.sharedApplication.windows.firstObject;
             UIView *root = win.rootViewController.view;
-            UISwipeGestureRecognizer *swipe =
-                [[UISwipeGestureRecognizer alloc] initWithTarget:nil action:nil];
-            swipe.direction = UISwipeGestureRecognizerDirectionUp;
             [root.gestureRecognizers enumerateObjectsUsingBlock:^(UIGestureRecognizer *g, NSUInteger i, BOOL *s) {
-                if ([g isKindOfClass:UISwipeGestureRecognizer.class]) [g.view sendActionsForControlEvents:UIControlEventTouchUpInside];
+                if ([g isKindOfClass:UISwipeGestureRecognizer.class] &&
+                    [g.view isKindOfClass:UIControl.class]) {
+                    [(UIControl *)g.view sendActionsForControlEvents:UIControlEventTouchUpInside];
+                }
             }];
         });
     }
