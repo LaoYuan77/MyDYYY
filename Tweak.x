@@ -56,7 +56,7 @@
 
 static inline BOOL DYYYGetBool(NSString *key) {
     NSNumber *v = [[NSUserDefaults standardUserDefaults] objectForKey:key];
-    return v ? [v boolValue] : YES;   // 默认全部开启
+    return v ? [v boolValue] : YES;
 }
 
 static inline void DYYYSetBool(NSString *key, BOOL value) {
@@ -66,23 +66,31 @@ static inline void DYYYSetBool(NSString *key, BOOL value) {
 
 #pragma mark - 设置项配置
 
-static NSArray<NSDictionary *> *DYYYSettingItems(void) {
-    return @[
-        @{@"key": @"DYYYHideFeedTabJumpGuide",     @"title": @"隐藏首页跳转引导"},
-        @{@"key": @"DYYYHideTopTabLine",           @"title": @"隐藏顶栏分割线"},
-        @{@"key": @"DYYYDisablePullRefresh",       @"title": @"禁用下拉刷新"},
-        @{@"key": @"DYYYDisableLivePCDN",          @"title": @"禁用直播 PCDN"},
-        @{@"key": @"DYYYChangeHomeTabText",        @"title": @"首页标签改为 𝑳𝒐𝒗𝒆"},
-        @{@"key": @"DYYYDisableHomeRefresh",       @"title": @"禁用首页二次点击刷新"},
-        @{@"key": @"DYYYHideCommentViews",         @"title": @"隐藏评论搜索浮层"},
-        @{@"key": @"DYYYHideInteractionSearch",    @"title": @"隐藏播放页搜索锚点"},
-        @{@"key": @"DYYYHideHotSearch",            @"title": @"隐藏热搜底部"},
-        @{@"key": @"DYYYHideHotspot",              @"title": @"隐藏热点"},
-        @{@"key": @"DYYYHideMessageTabRedPacket",  @"title": @"隐藏消息红包入口"},
-        @{@"key": @"DYYYHideQishuiMusicAnchor",    @"title": @"隐藏汽水音乐锚点"},
-        @{@"key": @"DYYYSkipQishuiMusicVideo",     @"title": @"跳过汽水音乐视频"},
-        @{@"key": @"DYYYNoUpdates",                @"title": @"屏蔽更新提示"},
+static NSArray *DYYYSettingItems(void) {
+    static NSArray *items = nil;
+    if (items) return items;
+    NSMutableArray *arr = [NSMutableArray array];
+    NSArray *keys = @[
+        @"DYYYHideFeedTabJumpGuide", @"DYYYHideTopTabLine", @"DYYYDisablePullRefresh",
+        @"DYYYDisableLivePCDN", @"DYYYChangeHomeTabText", @"DYYYDisableHomeRefresh",
+        @"DYYYHideCommentViews", @"DYYYHideInteractionSearch", @"DYYYHideHotSearch",
+        @"DYYYHideHotspot", @"DYYYHideMessageTabRedPacket", @"DYYYHideQishuiMusicAnchor",
+        @"DYYYSkipQishuiMusicVideo", @"DYYYNoUpdates",
     ];
+    NSArray *titles = @[
+        @"隐藏首页跳转引导", @"隐藏顶栏分割线", @"禁用下拉刷新",
+        @"禁用直播 PCDN", @"首页标签改为 𝑳𝒐𝒗𝒆", @"禁用首页二次点击刷新",
+        @"隐藏评论搜索浮层", @"隐藏播放页搜索锚点", @"隐藏热搜底部",
+        @"隐藏热点", @"隐藏消息红包入口", @"隐藏汽水音乐锚点",
+        @"跳过汽水音乐视频", @"屏蔽更新提示",
+    ];
+    for (NSUInteger i = 0; i < keys.count; i++) {
+        NSDictionary *d = [NSDictionary dictionaryWithObjectsAndKeys:
+                           keys[i], @"key", titles[i], @"title", nil];
+        [arr addObject:d];
+    }
+    items = [arr copy];
+    return items;
 }
 
 #pragma mark - 设置界面
@@ -96,9 +104,10 @@ static NSArray<NSDictionary *> *DYYYSettingItems(void) {
     [super viewDidLoad];
     self.title = @"DYYY 设置";
     self.tableView.tableFooterView = [UIView new];
-    UIBarButtonItem *closeBtn = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-                                                                              target:self
-                                                                              action:@selector(closeTapped)];
+    UIBarButtonItem *closeBtn = [[UIBarButtonItem alloc]
+        initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                             target:self
+                             action:@selector(closeTapped)];
     self.navigationItem.rightBarButtonItem = closeBtn;
 }
 
@@ -134,27 +143,28 @@ static NSArray<NSDictionary *> *DYYYSettingItems(void) {
 
 @end
 
-#pragma mark - 双指长按手势
+#pragma mark - 双指长按手势 + 工具方法
 
 @interface DYYYGestureHandler : NSObject
 + (instancetype)shared;
 - (void)handle:(UILongPressGestureRecognizer *)g;
++ (void)skipCurrentVideo;
 @end
 
 @implementation DYYYGestureHandler
 
 + (instancetype)shared {
-    static DYYYGestureHandler *s; static dispatch_once_t o;
-    dispatch_once(&o, ^{ s = [DYYYGestureHandler new]; });
+    static DYYYGestureHandler *s = nil;
+    if (!s) s = [DYYYGestureHandler new];
     return s;
 }
 
 - (void)handle:(UILongPressGestureRecognizer *)g {
     if (g.state != UIGestureRecognizerStateBegan) return;
     UIWindow *win = nil;
-    for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
-        if ([s isKindOfClass:UIWindowScene.class]) {
-            win = ((UIWindowScene *)s).windows.firstObject;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if ([scene isKindOfClass:UIWindowScene.class]) {
+            win = ((UIWindowScene *)scene).windows.firstObject;
             if (win) break;
         }
     }
@@ -163,6 +173,17 @@ static NSArray<NSDictionary *> *DYYYSettingItems(void) {
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFormSheet;
     [win.rootViewController presentViewController:nav animated:YES completion:nil];
+}
+
++ (void)skipCurrentVideo {
+    UIWindow *win = UIApplication.sharedApplication.windows.firstObject;
+    UIView *root = win.rootViewController.view;
+    for (UIGestureRecognizer *g in root.gestureRecognizers) {
+        if ([g isKindOfClass:UISwipeGestureRecognizer.class] &&
+            [g.view isKindOfClass:UIControl.class]) {
+            [(UIControl *)g.view sendActionsForControlEvents:UIControlEventTouchUpInside];
+        }
+    }
 }
 
 @end
@@ -178,7 +199,7 @@ static void DYYYAttachSettingsGestureToView(UIView *view) {
     objc_setAssociatedObject(view, "DYYYGesture", @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-#pragma mark - 1. 屏蔽更新提示（与原版一致）
+#pragma mark - 1. 屏蔽更新提示
 
 %hook AWEVersionUpdateManager
 - (void)startVersionUpdateWorkflow:(id)arg1 completion:(id)arg2 {
@@ -251,9 +272,8 @@ static void DYYYAttachSettingsGestureToView(UIView *view) {
         Ivar iv = class_getInstanceVariable([self class], "_status");
         if (iv) {
             id status = object_getIvar(self, iv);
-            if ([status respondsToSelector:@selector(isSelected)] &&
-                [[status valueForKey:@"isSelected"] boolValue]) {
-                return;     // 已选中再点 → 拦截刷新
+            if (status && [[status valueForKey:@"isSelected"] boolValue]) {
+                return;
             }
         }
     }
@@ -319,16 +339,9 @@ static void DYYYAttachSettingsGestureToView(UIView *view) {
 - (BOOL)isQishuiMusicVideo {
     BOOL r = %orig;
     if (r && DYYYGetBool(@"DYYYSkipQishuiMusicVideo")) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            UIWindow *win = UIApplication.sharedApplication.windows.firstObject;
-            UIView *root = win.rootViewController.view;
-            [root.gestureRecognizers enumerateObjectsUsingBlock:^(UIGestureRecognizer *g, NSUInteger i, BOOL *s) {
-                if ([g isKindOfClass:UISwipeGestureRecognizer.class] &&
-                    [g.view isKindOfClass:UIControl.class]) {
-                    [(UIControl *)g.view sendActionsForControlEvents:UIControlEventTouchUpInside];
-                }
-            }];
-        });
+        [DYYYGestureHandler performSelectorOnMainThread:@selector(skipCurrentVideo)
+                                             withObject:nil
+                                          waitUntilDone:NO];
     }
     return r;
 }
