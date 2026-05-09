@@ -64,6 +64,13 @@ static inline void DYYYSetBool(NSString *key, BOOL value) {
     [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
+// 辅助函数：调用 completion block（避免 ^ 符号出现在 %hook 内部导致 Logos 解析错误）
+static inline void DYYYInvokeCompletion(id completion) {
+    if (!completion) return;
+    void (^cb)(void) = completion;
+    cb();
+}
+
 #pragma mark - 设置项配置
 
 static NSArray *DYYYSettingItems(void) {
@@ -204,10 +211,12 @@ static void DYYYAttachSettingsGestureToView(UIView *view) {
 %hook AWEVersionUpdateManager
 - (void)startVersionUpdateWorkflow:(id)arg1 completion:(id)arg2 {
     if (DYYYGetBool(@"DYYYNoUpdates")) {
-        if (arg2) { void (^cb)(void) = arg2; cb(); }
-    } else { %orig; }
+        DYYYInvokeCompletion(arg2);
+    } else {
+        %orig;
+    }
 }
-- (id)workflow  { return DYYYGetBool(@"DYYYNoUpdates") ? nil : %orig; }
+- (id)workflow    { return DYYYGetBool(@"DYYYNoUpdates") ? nil : %orig; }
 - (id)badgeModule { return DYYYGetBool(@"DYYYNoUpdates") ? nil : %orig; }
 %end
 
