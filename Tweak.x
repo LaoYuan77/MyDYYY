@@ -1,346 +1,661 @@
-// DYYY (精简版)
-
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-#pragma mark - 类前向声明
+// ========== 设置开关：NSUserDefaults 持久化，首次默认全部开启 ==========
+static NSString *const DYYYSettingDefaultEnabledKey = @"__DYYYDefaultEnabled";
 
-@interface AWEFeedTabJumpGuideView : UIView @end
-@interface AWEFeedMultiTabSelectedContainerView : UIView @end
-@interface AWEFeedTableViewController : UIViewController
-- (BOOL)enablePullDownRefresh;
-@end
-@interface AWEFeedContainerViewController : UIViewController
-- (BOOL)enablePullDownRefresh;
-@end
-@interface HTSLiveStreamPcdnManager : NSObject
-- (void)startPcdn;
-- (BOOL)isPcdnEnabled;
-@end
-@interface IESLiveLaunchTaskPcdn : NSObject
-- (void)run;
-@end
-@interface AWENormalModeTabBarTextView : UIView
-- (void)setText:(NSString *)text;
-@end
-@interface AWENormalModeTabBarGeneralButton : UIControl
-- (void)onClick;
-@end
-@interface AWESearchAnchorListModel : NSObject
-- (BOOL)isHidden;
-@end
-@interface AWEPlayInteractionSearchAnchorView : UIView @end
-@interface AWEHotSearchInnerBottomView : UIView @end
-@interface AWEHotSpotListModel : NSObject
-- (BOOL)isHidden;
-@end
-@interface AWEIMMessageTabSideBarView : UIView @end
-@interface AWERelatedMusicAnchorModel : NSObject
-- (BOOL)isHidden;
-@end
-@interface AWEMusicExtraModel : NSObject
-- (id)anchorInfo;
-@end
-@interface AWEAwemeModel : NSObject
-- (BOOL)isQishuiMusicVideo;
-@end
-@interface AWEVersionUpdateManager : NSObject
-- (void)startVersionUpdateWorkflow:(id)arg1 completion:(id)arg2;
-- (id)workflow;
-- (id)badgeModule;
-@end
-@interface AWENormalModeTabBar : UIView @end
-
-#pragma mark - 设置读写
+static inline NSArray<NSDictionary *> *DYYYSettingItems(void) {
+    return @[
+        @{@"key": @"DYYYHideFeedTabJumpGuide", @"title": @"隐藏双列箭头", @"desc": @"隐藏首页双列/跳转引导箭头"},
+        @{@"key": @"DYYYHideTopTabLine", @"title": @"隐藏顶栏横线", @"desc": @"隐藏顶栏选中横线/容器"},
+        @{@"key": @"DYYYDisablePullRefresh", @"title": @"禁用下拉刷新", @"desc": @"阻止首页下拉刷新视频"},
+        @{@"key": @"DYYYDisableLivePCDN", @"title": @"禁用直播 PCDN", @"desc": @"阻止直播 PCDN 相关启动任务"},
+        @{@"key": @"DYYYChangeHomeTabText", @"title": @"首页改成 𝑳𝒐𝒗𝒆", @"desc": @"把底栏首页文字替换为 𝑳𝒐𝒗𝒆"},
+        @{@"key": @"DYYYDisableHomeRefresh", @"title": @"禁用点击首页刷新", @"desc": @"再次点击首页时不刷新推荐流"},
+        @{@"key": @"DYYYHideCommentViews", @"title": @"隐藏搜索词模型", @"desc": @"隐藏相关搜索/观看历史搜索词"},
+        @{@"key": @"DYYYHideInteractionSearch", @"title": @"隐藏视频页搜索锚点", @"desc": @"隐藏播放页相关搜索入口"},
+        @{@"key": @"DYYYHideHotSearch", @"title": @"隐藏弹出热搜框", @"desc": @"隐藏底部弹出的热搜/搜索框"},
+        @{@"key": @"DYYYHideHotspot", @"title": @"隐藏热点提示", @"desc": @"隐藏热点列表/热点提示文案"},
+        @{@"key": @"DYYYHideMessageTabRedPacket", @"title": @"隐藏消息页红包", @"desc": @"隐藏消息顶栏红包入口"},
+        @{@"key": @"DYYYHideQishuiMusicAnchor", @"title": @"隐藏汽水音乐入口", @"desc": @"隐藏去汽水听按钮/音乐锚点"},
+        @{@"key": @"DYYYSkipQishuiMusicVideo", @"title": @"跳过汽水音乐视频", @"desc": @"刷到带汽水音乐锚点的视频时直接过滤"},
+        @{@"key": @"DYYYNoUpdates", @"title": @"拦截版本更新", @"desc": @"屏蔽抖音版本更新流程"}
+    ];
+}
 
 static inline BOOL DYYYGetBool(NSString *key) {
-    NSNumber *v = [[NSUserDefaults standardUserDefaults] objectForKey:key];
-    return v ? [v boolValue] : YES;
+    if (!key || key.length == 0) return NO;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    id value = [defaults objectForKey:key];
+    if (value == nil) return YES;
+    return [defaults boolForKey:key];
 }
 
-static inline void DYYYSetBool(NSString *key, BOOL value) {
-    [[NSUserDefaults standardUserDefaults] setBool:value forKey:key];
-    [[NSUserDefaults standardUserDefaults] synchronize];
+static inline void DYYYSetBool(NSString *key, BOOL enabled) {
+    if (!key || key.length == 0) return;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setBool:enabled forKey:key];
+    [defaults synchronize];
 }
 
-#pragma mark - 设置项配置
+// ========== 顶层 VC 查找：用于弹出设置面板 ==========
+static NSArray<UIWindow *> *DYYYAllWindows(void) {
+    NSMutableArray<UIWindow *> *result = [NSMutableArray array];
+    @try {
+        UIApplication *app = [UIApplication sharedApplication];
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *scene in app.connectedScenes) {
+                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                for (UIWindow *window in windowScene.windows) {
+                    if (window && ![result containsObject:window]) {
+                        [result addObject:window];
+                    }
+                }
+            }
+        }
+        NSArray *windows = [app valueForKey:@"windows"];
+        for (id obj in windows) {
+            if ([obj isKindOfClass:[UIWindow class]] && ![result containsObject:obj]) {
+                [result addObject:obj];
+            }
+        }
+    } @catch (NSException *e) {}
+    return result;
+}
 
-static NSArray *DYYYSettingItems(void) {
-    static NSArray *items = nil;
-    if (items) return items;
-    NSMutableArray *arr = [NSMutableArray array];
-    NSArray *keys = @[
-        @"DYYYHideFeedTabJumpGuide", @"DYYYHideTopTabLine", @"DYYYDisablePullRefresh",
-        @"DYYYDisableLivePCDN", @"DYYYChangeHomeTabText", @"DYYYDisableHomeRefresh",
-        @"DYYYHideCommentViews", @"DYYYHideInteractionSearch", @"DYYYHideHotSearch",
-        @"DYYYHideHotspot", @"DYYYHideMessageTabRedPacket", @"DYYYHideQishuiMusicAnchor",
-        @"DYYYSkipQishuiMusicVideo", @"DYYYNoUpdates",
-    ];
-    NSArray *titles = @[
-        @"隐藏首页跳转引导", @"隐藏顶栏分割线", @"禁用下拉刷新",
-        @"禁用直播 PCDN", @"首页标签改为 𝑳𝒐𝒗𝒆", @"禁用首页二次点击刷新",
-        @"隐藏评论搜索浮层", @"隐藏播放页搜索锚点", @"隐藏热搜底部",
-        @"隐藏热点", @"隐藏消息红包入口", @"隐藏汽水音乐锚点",
-        @"跳过汽水音乐视频", @"屏蔽更新提示",
-    ];
-    for (NSUInteger i = 0; i < keys.count; i++) {
-        [arr addObject:@{@"key": keys[i], @"title": titles[i]}];
+static UIWindow *DYYYFindActiveWindow(void) {
+    UIWindow *fallback = nil;
+    for (UIWindow *window in DYYYAllWindows()) {
+        if (window.hidden || window.alpha <= 0.01) continue;
+        if (window.isKeyWindow) return window;
+        if (!fallback && window.rootViewController) fallback = window;
     }
-    items = [arr copy];
-    return items;
+    return fallback;
 }
 
-#pragma mark - 设置界面
+static UIViewController *DYYYTopViewController(void) {
+    UIWindow *window = DYYYFindActiveWindow();
+    if (!window) return nil;
+    UIViewController *vc = window.rootViewController;
+    @try {
+        BOOL changed = YES;
+        while (changed && vc) {
+            changed = NO;
+            if (vc.presentedViewController) { vc = vc.presentedViewController; changed = YES; continue; }
+            if ([vc isKindOfClass:[UINavigationController class]]) {
+                UIViewController *visibleVC = ((UINavigationController *)vc).visibleViewController;
+                if (visibleVC) { vc = visibleVC; changed = YES; continue; }
+            }
+            if ([vc isKindOfClass:[UITabBarController class]]) {
+                UIViewController *selectedVC = ((UITabBarController *)vc).selectedViewController;
+                if (selectedVC) { vc = selectedVC; changed = YES; continue; }
+            }
+        }
+    } @catch (NSException *e) {}
+    return vc;
+}
+
+// ========== 液态玻璃风格设置面板 ==========
+static inline UIColor *DYYYPrimaryTextColor(void) {
+    if (@available(iOS 13.0, *)) return UIColor.labelColor;
+    return UIColor.blackColor;
+}
+
+static inline UIColor *DYYYSecondaryTextColor(void) {
+    if (@available(iOS 13.0, *)) return UIColor.secondaryLabelColor;
+    return UIColor.darkGrayColor;
+}
+
+static inline UIBlurEffect *DYYYLiquidBlurEffect(void) {
+    if (@available(iOS 13.0, *)) {
+        return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
+    }
+    return [UIBlurEffect effectWithStyle:UIBlurEffectStyleLight];
+}
 
 @interface DYYYSettingsViewController : UITableViewController
+@property (nonatomic, strong) NSArray<NSDictionary *> *items;
+@property (nonatomic, weak) UIVisualEffectView *backgroundBlurView;
 @end
 
 @implementation DYYYSettingsViewController
 
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = @"DYYY 设置";
-    self.tableView.tableFooterView = [UIView new];
-    self.navigationItem.rightBarButtonItem =
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-                                                      target:self
-                                                      action:@selector(closeTapped)];
+- (instancetype)init {
+    UITableViewStyle style = UITableViewStyleGrouped;
+    if (@available(iOS 13.0, *)) style = UITableViewStyleInsetGrouped;
+    self = [super initWithStyle:style];
+    if (self) {
+        self.items = DYYYSettingItems();
+        self.title = @"DYYY 设置";
+    }
+    return self;
 }
 
-- (void)closeTapped { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)viewDidLoad {
+    [super viewDidLoad];
+
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 64.0;
+
+    // 全屏液态背景：渐变彩色 + 毛玻璃
+    UIView *gradientHost = [[UIView alloc] initWithFrame:self.view.bounds];
+    gradientHost.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    CAGradientLayer *gradient = [CAGradientLayer layer];
+    gradient.frame = gradientHost.bounds;
+    gradient.colors = @[
+        (id)[UIColor colorWithRed:0.62 green:0.78 blue:1.00 alpha:1.0].CGColor,
+        (id)[UIColor colorWithRed:0.85 green:0.70 blue:1.00 alpha:1.0].CGColor,
+        (id)[UIColor colorWithRed:1.00 green:0.78 blue:0.88 alpha:1.0].CGColor
+    ];
+    gradient.startPoint = CGPointMake(0.0, 0.0);
+    gradient.endPoint = CGPointMake(1.0, 1.0);
+    [gradientHost.layer addSublayer:gradient];
+
+    UIVisualEffectView *blur = [[UIVisualEffectView alloc] initWithEffect:DYYYLiquidBlurEffect()];
+    blur.frame = self.view.bounds;
+    blur.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+    UIView *backgroundContainer = [[UIView alloc] initWithFrame:self.view.bounds];
+    backgroundContainer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [backgroundContainer addSubview:gradientHost];
+    [backgroundContainer addSubview:blur];
+
+    self.tableView.backgroundView = backgroundContainer;
+    self.tableView.backgroundColor = UIColor.clearColor;
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    self.backgroundBlurView = blur;
+
+    [gradientHost.layer setNeedsLayout];
+
+    UIBarButtonItem *closeItem = [[UIBarButtonItem alloc] initWithTitle:@"完成"
+                                                                  style:UIBarButtonItemStyleDone
+                                                                 target:self
+                                                                 action:@selector(dyyy_close)];
+    self.navigationItem.rightBarButtonItem = closeItem;
+
+    // 导航栏也做成毛玻璃透明
+    UINavigationBar *bar = self.navigationController.navigationBar;
+    if (bar) {
+        if (@available(iOS 13.0, *)) {
+            UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
+            [appearance configureWithTransparentBackground];
+            appearance.backgroundEffect = DYYYLiquidBlurEffect();
+            appearance.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.05];
+            appearance.titleTextAttributes = @{ NSForegroundColorAttributeName: DYYYPrimaryTextColor() };
+            bar.standardAppearance = appearance;
+            bar.scrollEdgeAppearance = appearance;
+            if (@available(iOS 15.0, *)) bar.compactScrollEdgeAppearance = appearance;
+        } else {
+            [bar setBackgroundImage:[UIImage new] forBarMetrics:UIBarMetricsDefault];
+            bar.shadowImage = [UIImage new];
+            bar.translucent = YES;
+        }
+    }
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    UIView *bg = self.tableView.backgroundView;
+    if (bg.subviews.count > 0) {
+        UIView *gradientHost = bg.subviews.firstObject;
+        for (CALayer *layer in gradientHost.layer.sublayers) {
+            if ([layer isKindOfClass:[CAGradientLayer class]]) layer.frame = gradientHost.bounds;
+        }
+    }
+}
+
+- (void)dyyy_close {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return 1;
+}
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return DYYYSettingItems().count;
+    return self.items.count;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    return @"功能开关";
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    return @"所有开关默认开启。关闭某项后立即保存，部分界面类功能可能需要重新进入页面或重启抖音才完全恢复。";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    static NSString *ID = @"DYYYCell";
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:ID];
-    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:ID];
-    NSDictionary *item = DYYYSettingItems()[indexPath.row];
-    cell.textLabel.text = item[@"title"];
-    cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    UISwitch *sw = [UISwitch new];
-    sw.on = DYYYGetBool(item[@"key"]);
-    objc_setAssociatedObject(sw, "DYYYKey", item[@"key"], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [sw addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
-    cell.accessoryView = sw;
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"DYYYSwitchCell"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"DYYYSwitchCell"];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.textLabel.numberOfLines = 1;
+        cell.detailTextLabel.numberOfLines = 2;
+
+        // 液态玻璃 cell：毛玻璃 + 圆角 + 微高光
+        cell.backgroundColor = UIColor.clearColor;
+        cell.contentView.backgroundColor = UIColor.clearColor;
+
+        UIVisualEffectView *cellBlur = [[UIVisualEffectView alloc] initWithEffect:DYYYLiquidBlurEffect()];
+        cellBlur.layer.cornerRadius = 14.0;
+        cellBlur.layer.masksToBounds = YES;
+        cellBlur.layer.borderWidth = 0.5;
+        cellBlur.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.35].CGColor;
+        cell.backgroundView = cellBlur;
+
+        UIVisualEffectView *selBlur = [[UIVisualEffectView alloc] initWithEffect:DYYYLiquidBlurEffect()];
+        selBlur.contentView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.18];
+        selBlur.layer.cornerRadius = 14.0;
+        selBlur.layer.masksToBounds = YES;
+        cell.selectedBackgroundView = selBlur;
+
+        cell.textLabel.textColor = DYYYPrimaryTextColor();
+        cell.detailTextLabel.textColor = DYYYSecondaryTextColor();
+    }
+
+    NSDictionary *item = self.items[indexPath.row];
+    NSString *key = item[@"key"] ?: @"";
+
+    cell.textLabel.text = item[@"title"] ?: key;
+    cell.detailTextLabel.text = item[@"desc"] ?: @"";
+
+    UISwitch *toggle = [[UISwitch alloc] init];
+    toggle.on = DYYYGetBool(key);
+    toggle.onTintColor = [UIColor colorWithRed:0.40 green:0.55 blue:1.0 alpha:1.0];
+    objc_setAssociatedObject(toggle, @selector(dyyy_switchChanged:), key, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [toggle addTarget:self action:@selector(dyyy_switchChanged:) forControlEvents:UIControlEventValueChanged];
+    cell.accessoryView = toggle;
+
     return cell;
 }
 
-- (void)switchChanged:(UISwitch *)sw {
-    NSString *key = objc_getAssociatedObject(sw, "DYYYKey");
-    if (key) DYYYSetBool(key, sw.isOn);
+- (void)dyyy_switchChanged:(UISwitch *)sender {
+    NSString *key = objc_getAssociatedObject(sender, @selector(dyyy_switchChanged:));
+    if (key.length == 0) return;
+    DYYYSetBool(key, sender.isOn);
+}
+
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section {
+    if ([view isKindOfClass:[UITableViewHeaderFooterView class]]) {
+        UITableViewHeaderFooterView *header = (UITableViewHeaderFooterView *)view;
+        header.contentView.backgroundColor = UIColor.clearColor;
+        header.backgroundView = [UIView new];
+        header.backgroundView.backgroundColor = UIColor.clearColor;
+        header.textLabel.textColor = DYYYSecondaryTextColor();
+    }
+}
+
+- (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section {
+    if ([view isKindOfClass:[UITableViewHeaderFooterView class]]) {
+        UITableViewHeaderFooterView *footer = (UITableViewHeaderFooterView *)view;
+        footer.contentView.backgroundColor = UIColor.clearColor;
+        footer.backgroundView = [UIView new];
+        footer.backgroundView.backgroundColor = UIColor.clearColor;
+        footer.textLabel.textColor = DYYYSecondaryTextColor();
+    }
 }
 
 @end
 
-#pragma mark - 双指长按手势
+static void DYYYShowSettingsPanel(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            UIViewController *vc = DYYYTopViewController();
+            if (!vc) return;
+            NSString *className = NSStringFromClass([vc class]);
+            if ([className containsString:@"DYYYSettingsViewController"]) return;
+            if ([vc isKindOfClass:[UIAlertController class]]) return;
+
+            DYYYSettingsViewController *settingsVC = [[DYYYSettingsViewController alloc] init];
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:settingsVC];
+            nav.modalPresentationStyle = UIModalPresentationFullScreen;
+            nav.view.backgroundColor = UIColor.clearColor;
+            nav.modalPresentationCapturesStatusBarAppearance = YES;
+
+            [vc presentViewController:nav animated:YES completion:nil];
+        } @catch (NSException *e) {
+            NSLog(@"[DYYY Settings] present exception: %@", e);
+        }
+    });
+}
 
 @interface DYYYGestureHandler : NSObject
-+ (instancetype)shared;
-- (void)handle:(UILongPressGestureRecognizer *)g;
-+ (void)skipCurrentVideo;
++ (instancetype)sharedHandler;
+- (void)handleTwoFingerLongPress:(UILongPressGestureRecognizer *)gesture;
 @end
 
 @implementation DYYYGestureHandler
 
-+ (instancetype)shared {
-    static DYYYGestureHandler *s = nil;
-    if (!s) s = [DYYYGestureHandler new];
-    return s;
++ (instancetype)sharedHandler {
+    static DYYYGestureHandler *handler = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        handler = [[DYYYGestureHandler alloc] init];
+    });
+    return handler;
 }
 
-- (void)handle:(UILongPressGestureRecognizer *)g {
-    if (g.state != UIGestureRecognizerStateBegan) return;
-    UIWindow *win = nil;
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if ([scene isKindOfClass:UIWindowScene.class]) {
-            win = ((UIWindowScene *)scene).windows.firstObject;
-            if (win) break;
-        }
-    }
-    if (!win) return;
-    DYYYSettingsViewController *vc = [DYYYSettingsViewController new];
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    nav.modalPresentationStyle = UIModalPresentationFormSheet;
-    [win.rootViewController presentViewController:nav animated:YES completion:nil];
-}
-
-+ (void)skipCurrentVideo {
-    UIWindow *win = nil;
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if ([scene isKindOfClass:UIWindowScene.class]) {
-            win = ((UIWindowScene *)scene).windows.firstObject;
-            if (win) break;
-        }
-    }
-    if (!win) return;
-    UIView *root = win.rootViewController.view;
-    for (UIGestureRecognizer *g in root.gestureRecognizers) {
-        if ([g isKindOfClass:UISwipeGestureRecognizer.class] &&
-            [g.view isKindOfClass:UIControl.class]) {
-            [(UIControl *)g.view sendActionsForControlEvents:UIControlEventTouchUpInside];
-        }
-    }
+- (void)handleTwoFingerLongPress:(UILongPressGestureRecognizer *)gesture {
+    if (gesture.state != UIGestureRecognizerStateBegan) return;
+    static NSTimeInterval lastShowTime = 0;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - lastShowTime < 1.5) return;
+    lastShowTime = now;
+    DYYYShowSettingsPanel();
 }
 
 @end
 
 static void DYYYAttachSettingsGestureToView(UIView *view) {
-    if (!view || objc_getAssociatedObject(view, "DYYYGesture")) return;
-    UILongPressGestureRecognizer *g =
-        [[UILongPressGestureRecognizer alloc] initWithTarget:[DYYYGestureHandler shared]
-                                                      action:@selector(handle:)];
-    g.numberOfTouchesRequired = 2;
-    g.minimumPressDuration = 0.6;
-    [view addGestureRecognizer:g];
-    objc_setAssociatedObject(view, "DYYYGesture", @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!view) return;
+    @try {
+        static const void *DYYYSettingsGestureInstalledKey = &DYYYSettingsGestureInstalledKey;
+        NSNumber *installed = objc_getAssociatedObject(view, DYYYSettingsGestureInstalledKey);
+        if (installed.boolValue) return;
+
+        UILongPressGestureRecognizer *gesture = [[UILongPressGestureRecognizer alloc] initWithTarget:[DYYYGestureHandler sharedHandler]
+                                                                                              action:@selector(handleTwoFingerLongPress:)];
+        gesture.numberOfTouchesRequired = 2;
+        gesture.minimumPressDuration = 0.75;
+        gesture.cancelsTouchesInView = NO;
+        gesture.delaysTouchesBegan = NO;
+        gesture.delaysTouchesEnded = NO;
+
+        [view addGestureRecognizer:gesture];
+        objc_setAssociatedObject(view, DYYYSettingsGestureInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } @catch (NSException *e) {
+        NSLog(@"[DYYY Settings] attach gesture exception: %@", e);
+    }
 }
 
-#pragma mark - 1. 屏蔽更新提示
+// ========== 身份声明 ==========
+@interface AWEFeedTabJumpGuideView : UIView @end
+@interface AWEFeedMultiTabSelectedContainerView : UIView @end
+@interface AWENormalModeTabBarTextView : UIView @end
 
-%hook AWEVersionUpdateManager
-- (void)startVersionUpdateWorkflow:(id)arg1 completion:(id)arg2 {
-    if (!DYYYGetBool(@"DYYYNoUpdates")) %orig;
-}
-- (id)workflow    { return DYYYGetBool(@"DYYYNoUpdates") ? nil : %orig; }
-- (id)badgeModule { return DYYYGetBool(@"DYYYNoUpdates") ? nil : %orig; }
-%end
+@interface AWENormalModeTabBarGeneralButton : UIButton
+@property (nonatomic, assign) NSInteger status;
+@end
 
-#pragma mark - 2. 隐藏首页跳转引导
+@interface AWESearchAnchorListModel : NSObject @end
+@interface AWEPlayInteractionSearchAnchorView : UIView @end
+@interface AWEHotSearchInnerBottomView : UIView @end
+@interface AWEHotSpotListModel : NSObject @end
+@interface AWEIMMessageTabSideBarView : UIView @end
+@interface AWERelatedMusicAnchorModel : NSObject @end
+@interface AWEMusicExtraModel : NSObject @end
 
+@interface AWEAwemeModel : NSObject
+- (BOOL)contentFilter;
+@end
+
+// ==========================================
+// 功能 1：隐藏双列箭头
+// ==========================================
 %hook AWEFeedTabJumpGuideView
-- (void)setHidden:(BOOL)h { %orig(DYYYGetBool(@"DYYYHideFeedTabJumpGuide") ? YES : h); }
-- (void)didMoveToSuperview {
+- (void)layoutSubviews {
     %orig;
-    if (DYYYGetBool(@"DYYYHideFeedTabJumpGuide")) [self removeFromSuperview];
+    if (DYYYGetBool(@"DYYYHideFeedTabJumpGuide")) {
+        self.alpha = 0.0;
+        self.hidden = YES;
+        [self removeFromSuperview];
+    }
+}
+- (void)setHidden:(BOOL)hidden {
+    if (DYYYGetBool(@"DYYYHideFeedTabJumpGuide")) { %orig(YES); return; }
+    %orig(hidden);
+}
+- (void)setAlpha:(CGFloat)alpha {
+    if (DYYYGetBool(@"DYYYHideFeedTabJumpGuide")) { %orig(0.0); return; }
+    %orig(alpha);
 }
 %end
 
-#pragma mark - 3. 隐藏顶栏分割线
-
+// ==========================================
+// 功能 2：隐藏顶栏横线
+// ==========================================
 %hook AWEFeedMultiTabSelectedContainerView
 - (void)layoutSubviews {
     %orig;
-    if (!DYYYGetBool(@"DYYYHideTopTabLine")) return;
-    for (UIView *v in self.subviews) {
-        if (CGRectGetHeight(v.frame) < 2.0) v.hidden = YES;
+    if (DYYYGetBool(@"DYYYHideTopTabLine")) {
+        self.alpha = 0.0;
+        self.hidden = YES;
     }
+}
+- (void)setHidden:(BOOL)hidden {
+    if (DYYYGetBool(@"DYYYHideTopTabLine")) { %orig(YES); return; }
+    %orig(hidden);
+}
+- (void)setAlpha:(CGFloat)alpha {
+    if (DYYYGetBool(@"DYYYHideTopTabLine")) { %orig(0.0); return; }
+    %orig(alpha);
 }
 %end
 
-#pragma mark - 4. 禁用下拉刷新
-
+// ==========================================
+// 功能 3：禁用下拉刷新视频
+// ==========================================
 %hook AWEFeedTableViewController
-- (BOOL)enablePullDownRefresh { return DYYYGetBool(@"DYYYDisablePullRefresh") ? NO : %orig; }
+- (BOOL)canRefresh {
+    if (DYYYGetBool(@"DYYYDisablePullRefresh")) return NO;
+    return %orig;
+}
+- (void)setCanRefresh:(BOOL)arg {
+    if (DYYYGetBool(@"DYYYDisablePullRefresh")) { %orig(NO); return; }
+    %orig(arg);
+}
+- (void)refreshData { if (DYYYGetBool(@"DYYYDisablePullRefresh")) return; %orig; }
+- (void)handlePullToRefresh { if (DYYYGetBool(@"DYYYDisablePullRefresh")) return; %orig; }
+- (void)pulldownToRefresh { if (DYYYGetBool(@"DYYYDisablePullRefresh")) return; %orig; }
 %end
 
 %hook AWEFeedContainerViewController
-- (BOOL)enablePullDownRefresh { return DYYYGetBool(@"DYYYDisablePullRefresh") ? NO : %orig; }
+- (BOOL)canRefresh {
+    if (DYYYGetBool(@"DYYYDisablePullRefresh")) return NO;
+    return %orig;
+}
+- (void)setCanRefresh:(BOOL)arg {
+    if (DYYYGetBool(@"DYYYDisablePullRefresh")) { %orig(NO); return; }
+    %orig(arg);
+}
 %end
 
-#pragma mark - 5. 禁用直播 PCDN
-
+// ==========================================
+// 功能 4：禁用直播 PCDN
+// ==========================================
 %hook HTSLiveStreamPcdnManager
-- (void)startPcdn { if (!DYYYGetBool(@"DYYYDisableLivePCDN")) %orig; }
-- (BOOL)isPcdnEnabled { return DYYYGetBool(@"DYYYDisableLivePCDN") ? NO : %orig; }
++ (void)start { if (DYYYGetBool(@"DYYYDisableLivePCDN")) return; %orig; }
++ (void)configAndStartLiveIO { if (DYYYGetBool(@"DYYYDisableLivePCDN")) return; %orig; }
 %end
 
 %hook IESLiveLaunchTaskPcdn
-- (void)run { if (!DYYYGetBool(@"DYYYDisableLivePCDN")) %orig; }
+- (void)excute { if (DYYYGetBool(@"DYYYDisableLivePCDN")) return; %orig; }
 %end
 
-#pragma mark - 6. 首页标签 → 𝑳𝒐𝒗𝒆
-
+// ==========================================
+// 功能 5：底栏"首页"改成 𝑳𝒐𝒗𝒆
+// ==========================================
 %hook AWENormalModeTabBarTextView
-- (void)setText:(NSString *)text {
-    if (DYYYGetBool(@"DYYYChangeHomeTabText") && [text isEqualToString:@"首页"]) {
-        %orig(@"𝑳𝒐𝒗𝒆");
-    } else { %orig; }
-}
-%end
-
-#pragma mark - 7. 禁用首页二次点击刷新
-
-%hook AWENormalModeTabBarGeneralButton
-- (void)onClick {
-    if (DYYYGetBool(@"DYYYDisableHomeRefresh") && self.isSelected) return;
+- (void)layoutSubviews {
     %orig;
+    if (!DYYYGetBool(@"DYYYChangeHomeTabText")) return;
+    @try {
+        for (UIView *subview in self.subviews) {
+            if ([subview isKindOfClass:[UILabel class]]) {
+                UILabel *label = (UILabel *)subview;
+                if ([label.text isEqualToString:@"首页"]) label.text = @"𝑳𝒐𝒗𝒆";
+            }
+        }
+    } @catch (NSException *e) {}
 }
 %end
 
-#pragma mark - 8. 隐藏评论搜索浮层
-
-%hook AWESearchAnchorListModel
-- (BOOL)isHidden { return DYYYGetBool(@"DYYYHideCommentViews") ? YES : %orig; }
+// ==========================================
+// 功能 6：禁用点击首页刷新
+// ==========================================
+%hook AWENormalModeTabBarGeneralButton
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    if (DYYYGetBool(@"DYYYDisableHomeRefresh")) {
+        @try {
+            NSString *label = self.accessibilityLabel ?: @"";
+            if ([label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"]) {
+                NSNumber *statusObj = [self valueForKey:@"status"];
+                if (statusObj && [statusObj integerValue] == 2) return NO;
+            }
+        } @catch (NSException *e) {}
+    }
+    return %orig(point, event);
+}
+- (BOOL)enableRefresh {
+    if (DYYYGetBool(@"DYYYDisableHomeRefresh")) {
+        @try {
+            NSString *label = self.accessibilityLabel ?: @"";
+            if ([label containsString:@"首页"] || [label containsString:@"𝑳𝒐𝒗𝒆"]) return NO;
+        } @catch (NSException *e) {}
+    }
+    return %orig;
+}
 %end
 
-#pragma mark - 9. 隐藏播放页搜索锚点
+// ==========================================
+// 功能 7：隐藏相关搜索 / 观看历史搜索
+// ==========================================
+%hook AWESearchAnchorListModel
+- (BOOL)hideWords {
+    if (DYYYGetBool(@"DYYYHideCommentViews")) return YES;
+    return %orig;
+}
+%end
 
 %hook AWEPlayInteractionSearchAnchorView
-- (void)setHidden:(BOOL)h { %orig(DYYYGetBool(@"DYYYHideInteractionSearch") ? YES : h); }
-- (void)didMoveToSuperview {
+- (void)layoutSubviews {
+    if (DYYYGetBool(@"DYYYHideInteractionSearch")) { [self removeFromSuperview]; return; }
     %orig;
-    if (DYYYGetBool(@"DYYYHideInteractionSearch")) [self removeFromSuperview];
 }
 %end
 
-#pragma mark - 10. 隐藏热搜底部
-
+// ==========================================
+// 功能 8：隐藏弹出热搜 / 热点框
+// ==========================================
 %hook AWEHotSearchInnerBottomView
-- (void)setHidden:(BOOL)h { %orig(DYYYGetBool(@"DYYYHideHotSearch") ? YES : h); }
-- (void)didMoveToSuperview {
+- (void)layoutSubviews {
+    if (DYYYGetBool(@"DYYYHideHotSearch")) { [self removeFromSuperview]; return; }
     %orig;
-    if (DYYYGetBool(@"DYYYHideHotSearch")) [self removeFromSuperview];
 }
 %end
-
-#pragma mark - 11. 隐藏热点
 
 %hook AWEHotSpotListModel
-- (BOOL)isHidden { return DYYYGetBool(@"DYYYHideHotspot") ? YES : %orig; }
+- (BOOL)disableDisplay { if (DYYYGetBool(@"DYYYHideHotspot")) return YES; return %orig; }
+- (BOOL)disableDisplayInner { if (DYYYGetBool(@"DYYYHideHotspot")) return YES; return %orig; }
+- (NSString *)hotSpotTipTitleHeader { if (DYYYGetBool(@"DYYYHideHotspot")) return @""; return %orig; }
+- (NSString *)hotSpotTipTitle { if (DYYYGetBool(@"DYYYHideHotspot")) return @""; return %orig; }
 %end
 
-#pragma mark - 12. 隐藏消息红包入口
-
+// ==========================================
+// 功能 9：隐藏消息顶栏红包
+// ==========================================
 %hook AWEIMMessageTabSideBarView
-- (void)setHidden:(BOOL)h { %orig(DYYYGetBool(@"DYYYHideMessageTabRedPacket") ? YES : h); }
-- (void)didMoveToSuperview {
+- (void)layoutSubviews {
     %orig;
-    if (DYYYGetBool(@"DYYYHideMessageTabRedPacket")) [self removeFromSuperview];
+    if (!DYYYGetBool(@"DYYYHideMessageTabRedPacket")) return;
+    UIView *parentView = self.superview;
+    if (!parentView) return;
+    NSArray<UIView *> *siblings = [parentView.subviews copy];
+    if (siblings.count <= 1) return;
+    for (UIView *subview in siblings) {
+        if (subview != self) [subview removeFromSuperview];
+    }
 }
 %end
 
-#pragma mark - 13. 隐藏汽水音乐锚点
+// ==========================================
+// 功能 10 & 12：隐藏汽水音乐入口 / 跳过相关视频
+// ==========================================
+%hook AWEAwemeModel
+- (instancetype)initWithDictionary:(id)dict error:(NSError **)error {
+    id orig = %orig;
+    if (orig && DYYYGetBool(@"DYYYSkipQishuiMusicVideo") && [orig contentFilter]) return nil;
+    return orig;
+}
+
+%new
+- (BOOL)contentFilter {
+    BOOL skipMusic = DYYYGetBool(@"DYYYSkipQishuiMusicVideo");
+    id realAnchor = nil;
+    Ivar anchorIvar = class_getInstanceVariable([self class], "_relatedMusicAnchor");
+    if (anchorIvar) realAnchor = object_getIvar(self, anchorIvar);
+    return skipMusic && realAnchor != nil;
+}
+
+- (id)relatedMusicAnchor {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) return nil;
+    return %orig;
+}
+- (void)setRelatedMusicAnchor:(id)anchor {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) { %orig(nil); return; }
+    %orig;
+}
+%end
 
 %hook AWERelatedMusicAnchorModel
-- (BOOL)isHidden { return DYYYGetBool(@"DYYYHideQishuiMusicAnchor") ? YES : %orig; }
+- (instancetype)init {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) return nil;
+    return %orig;
+}
+- (instancetype)initWithDictionary:(id)dict error:(NSError **)error {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) return nil;
+    return %orig;
+}
 %end
 
 %hook AWEMusicExtraModel
-- (id)anchorInfo { return DYYYGetBool(@"DYYYHideQishuiMusicAnchor") ? nil : %orig; }
-%end
-
-#pragma mark - 14. 跳过汽水音乐视频
-
-%hook AWEAwemeModel
-- (BOOL)isQishuiMusicVideo {
-    BOOL r = %orig;
-    if (r && DYYYGetBool(@"DYYYSkipQishuiMusicVideo")) {
-        [DYYYGestureHandler performSelectorOnMainThread:@selector(skipCurrentVideo)
-                                             withObject:nil
-                                          waitUntilDone:NO];
-    }
-    return r;
+- (id)commentTopBarInfo {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) return nil;
+    return %orig;
+}
+- (void)setCommentTopBarInfo:(id)info {
+    if (DYYYGetBool(@"DYYYHideQishuiMusicAnchor")) { %orig(nil); return; }
+    %orig;
 }
 %end
 
-#pragma mark - 入口手势挂载
+// ==========================================
+// 功能 11：屏蔽版本更新
+// ==========================================
+%hook AWEVersionUpdateManager
 
-%hook AWENormalModeTabBar
-- (void)didMoveToWindow {
-    %orig;
-    DYYYAttachSettingsGestureToView(self);
+- (void)startVersionUpdateWorkflow:(id)arg1 completion:(id)arg2 {
+    if (DYYYGetBool(@"DYYYNoUpdates")) {
+        if (arg2) {
+            void (^completionBlock)(void) = arg2;
+            completionBlock();
+        }
+    } else {
+        %orig;
+    }
+}
+
+- (id)workflow {
+    return DYYYGetBool(@"DYYYNoUpdates") ? nil : %orig;
+}
+
+- (id)badgeModule {
+    return DYYYGetBool(@"DYYYNoUpdates") ? nil : %orig;
+}
+
+%end
+
+// ==========================================
+// 全局：给可见 VC 装上双指长按手势打开设置
+// ==========================================
+%hook UIViewController
+- (void)viewDidAppear:(BOOL)animated {
+    %orig(animated);
+    @try {
+        NSString *className = NSStringFromClass([self class]);
+        if ([className containsString:@"DYYYSettingsViewController"]) return;
+        DYYYAttachSettingsGestureToView(self.view);
+    } @catch (NSException *e) {}
 }
 %end
