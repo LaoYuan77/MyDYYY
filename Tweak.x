@@ -63,20 +63,6 @@ static inline void DYYYSetBool(NSString *key, BOOL value) {
     [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
-// 用 Block ABI 结构体调用 completion，完全避免 ^ 符号
-typedef struct {
-    void *isa;
-    int   flags;
-    int   reserved;
-    void  (*invoke)(void *);
-} DYYYBlockLayout;
-
-static void DYYYInvokeCompletion(id completion) {
-    if (!completion) return;
-    DYYYBlockLayout *blk = (__bridge DYYYBlockLayout *)completion;
-    blk->invoke(blk);
-}
-
 #pragma mark - 设置项配置
 
 static NSArray *DYYYSettingItems(void) {
@@ -182,7 +168,14 @@ static NSArray *DYYYSettingItems(void) {
 }
 
 + (void)skipCurrentVideo {
-    UIWindow *win = UIApplication.sharedApplication.windows.firstObject;
+    UIWindow *win = nil;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if ([scene isKindOfClass:UIWindowScene.class]) {
+            win = ((UIWindowScene *)scene).windows.firstObject;
+            if (win) break;
+        }
+    }
+    if (!win) return;
     UIView *root = win.rootViewController.view;
     for (UIGestureRecognizer *g in root.gestureRecognizers) {
         if ([g isKindOfClass:UISwipeGestureRecognizer.class] &&
@@ -209,11 +202,7 @@ static void DYYYAttachSettingsGestureToView(UIView *view) {
 
 %hook AWEVersionUpdateManager
 - (void)startVersionUpdateWorkflow:(id)arg1 completion:(id)arg2 {
-    if (DYYYGetBool(@"DYYYNoUpdates")) {
-        DYYYInvokeCompletion(arg2);
-    } else {
-        %orig;
-    }
+    if (!DYYYGetBool(@"DYYYNoUpdates")) %orig;
 }
 - (id)workflow    { return DYYYGetBool(@"DYYYNoUpdates") ? nil : %orig; }
 - (id)badgeModule { return DYYYGetBool(@"DYYYNoUpdates") ? nil : %orig; }
@@ -276,13 +265,7 @@ static void DYYYAttachSettingsGestureToView(UIView *view) {
 
 %hook AWENormalModeTabBarGeneralButton
 - (void)onClick {
-    if (DYYYGetBool(@"DYYYDisableHomeRefresh")) {
-        Ivar iv = class_getInstanceVariable([self class], "_status");
-        if (iv) {
-            id status = object_getIvar(self, iv);
-            if (status && [[status valueForKey:@"isSelected"] boolValue]) return;
-        }
-    }
+    if (DYYYGetBool(@"DYYYDisableHomeRefresh") && self.isSelected) return;
     %orig;
 }
 %end
