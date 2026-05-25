@@ -1,4 +1,4 @@
-name: Build iOS Tweak
+name: Build dylib
 
 on:
   push:
@@ -7,35 +7,25 @@ on:
 
 jobs:
   build:
-    name: Build .deb Package
+    name: Build dylib
     runs-on: macos-latest
-
-    env:
-      THEOS: ${{ github.workspace }}/theos
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
-        run: brew install dpkg ldid
-
-      - name: Setup Theos
+      - name: Compile dylib
         run: |
-          git clone --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
+          # 直接调用 clang 编译，不需要 Theos 环境
+          # -dynamiclib: 生成动态库
+          # -framework: 链接必要的系统库
+          # -arch arm64: 指定 iPhone 架构
+          clang -dynamiclib -o MyDYYY.dylib \
+            -framework UIKit -framework Foundation \
+            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
+            -arch arm64 Tweak.x -fobjc-arc
 
-      - name: Setup iOS SDK
-        run: |
-          git clone https://github.com/theos/sdks.git ${{ github.workspace }}/theos/sdks
-
-      - name: Build Tweak
-        run: |
-          # 关键修改：手动将 MobileSubstrate 的库路径添加到编译指令中
-          export LDFLAGS="-L${THEOS}/lib"
-          make package FINALPACKAGE=1
-
-      - name: Upload Artifact
+      - name: Upload dylib
         uses: actions/upload-artifact@v4
         with:
-          name: MyDYYY-Tweak
-          path: packages/*.deb
+          name: MyDYYY-dylib
+          path: MyDYYY.dylib
