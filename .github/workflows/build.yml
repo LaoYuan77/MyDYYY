@@ -15,11 +15,8 @@ jobs:
 
       - name: Compile dylib
         run: |
-          # 直接调用 clang 编译，不需要 Theos 环境
-          # -dynamiclib: 生成动态库
-          # -framework: 链接必要的系统库
-          # -arch arm64: 指定 iPhone 架构
-          clang -dynamiclib -o MyDYYY.dylib \
+          # 加上了 -x objective-c 强制告诉编译器这是标准代码
+          clang -x objective-c -dynamiclib -o MyDYYY.dylib \
             -framework UIKit -framework Foundation \
             -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
             -arch arm64 Tweak.x -fobjc-arc
