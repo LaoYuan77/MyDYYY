@@ -1,9 +1,0 @@
-Package: com.laoyuan.mydyyy
-Name: MyDYYY
-Depends: mobilesubstrate
-Version: 1.0.0
-Architecture: iphoneos-arm
-Description: 禁用下拉刷新增强
-Maintainer: LaoYuan
-Author: LaoYuan
-Section: Tweaks
