@@ -30,6 +30,8 @@ jobs:
 
       - name: Build Tweak
         run: |
+          # 关键修改：手动将 MobileSubstrate 的库路径添加到编译指令中
+          export LDFLAGS="-L${THEOS}/lib"
           make package FINALPACKAGE=1
 
       - name: Upload Artifact
