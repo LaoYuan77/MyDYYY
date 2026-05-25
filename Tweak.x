@@ -1,7 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
-// 强制开启该功能
+// 强制让禁用下拉刷新的开关永远生效
 #define DYYYGetBool(key) YES
 
 %hook AWEFeedTableViewController
