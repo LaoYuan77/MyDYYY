@@ -2,24 +2,38 @@ name: Build iOS Tweak
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
   build:
+    name: Build .deb Package
     runs-on: macos-latest
+
+    env:
+      THEOS: ${{ github.workspace }}/theos
+
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v4
-        
+
+      - name: Install Dependencies
+        run: brew install dpkg ldid
+
       - name: Setup Theos
-        uses: Randomblock1/theos-action@v1
-        
+        run: |
+          git clone --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
+
+      - name: Setup iOS SDK
+        run: |
+          git clone https://github.com/theos/sdks.git ${{ github.workspace }}/theos/sdks
+
       - name: Build Tweak
-        run: make FINALPACKAGE=1
-        
-      - name: Upload Dylib
+        run: |
+          make package FINALPACKAGE=1
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MyDYYY-Dylib
-          path: .theos/obj/**/*.dylib
+          name: MyDYYY-Tweak
+          path: packages/*.deb
